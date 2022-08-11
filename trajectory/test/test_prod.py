@@ -6,9 +6,11 @@ from test import make_axes
 from trajectory.messages import *
 from trajectory.proto import SyncProto
 from . import TestStepper
+from trajectory.joystick import PygameJoystick
+from math import sqrt
 
-#packet_port = '/dev/cu.usbmodem64213801'  # Production
-packet_port = '/dev/cu.usbmodem64213901' # Test
+packet_port = '/dev/cu.usbmodem64213801'  # Production
+#packet_port = '/dev/cu.usbmodem64213901' # Test
 encoder_port = '/dev/cu.usbmodem63874601'  # Production
 
 baudrate = 115200  # 20_000_000
@@ -83,7 +85,8 @@ class TestSerial(TestStepper):
             if m.name != 'MESSAGE':
                 print(m)
 
-        p = self.init(800, 'axes6', a=.3, usteps=10, use_encoder=True,
+        p = self.init(packet_port, encoder_port,
+                      800, 'axes6', a=.3, usteps=10, use_encoder=False,
                       highvalue=OutVal.HIGH, outmode=OutMode.OUTPUT_OPENDRAIN,
                       period=5)
 
@@ -201,7 +204,41 @@ class TestSerial(TestStepper):
         p.run()
         p.runempty(cb, timeout=1)
 
+    def test_joystick(self):
 
+        def cb(p, m):
+            if m.name != 'MESSAGE':
+                print(m)
+
+        p = self.init(packet_port, encoder_port,
+                      500, 'axes6', a=1, usteps=10, use_encoder=False,
+                      outmode=OutMode.OUTPUT_OPENDRAIN, period=5
+                      )
+        p.reset()
+        p.run()
+
+        r = p.mspr
+        s = p.x_1sec
+
+        def rms(l):
+
+            return sqrt(sum([e**2 for e in l]))
+
+        for e in PygameJoystick(t=.05):
+
+            moves = [a / 1000 * s for a in e.axes]
+            moves = [  e if abs(e) > 360 else 0 for e in moves ]
+
+            l2 = rms(moves)
+            print(p.queue_length, str(moves),end='\n')
+
+            if l2 > 0:
+                p.jog(.1, moves)
+
+            p.runout(cb)
+
+        p.info()
+        p.stop()
 
 if __name__ == '__main__':
     unittest.main()

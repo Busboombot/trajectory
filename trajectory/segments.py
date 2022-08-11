@@ -572,7 +572,8 @@ class Segment(object):
 
 class SegmentList(object):
 
-    positions: List[float]
+    positions: List[float] # Positions after last movement addition
+    segments: deque
 
     def __init__(self, joints: List[Joint]):
 

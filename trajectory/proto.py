@@ -244,6 +244,17 @@ class SyncProto(object):
                 if cb:
                     cb(self, m)
 
+    def runlen(self, l, cb=None, timeout=False):
+        """Run until the queue length is less than l"""
+
+        if not self.running:
+            self.run()
+
+        while self.queue_length> l:
+            for m in self:
+                if cb:
+                    cb(self, m)
+
     @property
     def queue_length(self):
         return self.current_state.queue_length

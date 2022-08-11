@@ -52,7 +52,7 @@ class TestPoints(unittest.TestCase):
 
     def test_rec_joy_moves_cmd(self):
 
-        with open('joy_moves.csv') as f:
+        with open('data/joy_moves.csv') as f:
             moves = list(csv.reader(f))
 
         n_axes = 6
@@ -85,7 +85,7 @@ class TestPoints(unittest.TestCase):
 
     def test_rec_joy_moves_cmd_2(self):
 
-        with open('joy_moves.csv') as f:
+        with open('data/joy_moves.csv') as f:
             moves = list(csv.reader(f))
 
         n_axes = 6
@@ -370,7 +370,7 @@ class TestPoints(unittest.TestCase):
 
     def test_short_moves(self):
 
-        self.run_moves_from_commands('short_moves.csv', microsteps=10)
+        self.run_moves_from_commands('data/short_moves.csv', microsteps=10)
 
     def test_long_moves(self):
 
@@ -378,13 +378,13 @@ class TestPoints(unittest.TestCase):
 
         for i in range(10000):
             print(f"======= {i} ======")
-            self.run_moves_from_commands('long_moves.csv', microsteps=5, axes=1)
+            self.run_moves_from_commands('data/long_moves.csv', microsteps=5, axes=1)
 
     def test_long_slow_moves(self):
 
         for i in range(10000):
             print(f"======= {i} ======")
-            self.run_moves_from_commands('slow_long_moves.csv', microsteps=5, axes=1)
+            self.run_moves_from_commands('data/slow_long_moves.csv', microsteps=5, axes=1)
 
 
     def test_csv_moves(self):
@@ -392,7 +392,7 @@ class TestPoints(unittest.TestCase):
         from operator import itemgetter
         d = dirname(dirname(abspath(__file__)))
 
-        with open(join(d, 'test', 'recorded_moves.csv')) as f:
+        with open(join(d, 'test', 'data/recorded_moves.csv')) as f:
             moves = list(csv.DictReader(f))
 
         ig = itemgetter(*('axis0,axis1,axis2,axis3,axis4,axis5'.split(',')))

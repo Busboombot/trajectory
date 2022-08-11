@@ -15,6 +15,7 @@ def sel_axis(df, axis):
 
 
 def plot_axis(df, axis, ax=None):
+
     t = sel_axis(df, axis)
 
     ax = t[['v_f']].plot(ax=ax, figsize=(20, 3))
@@ -29,7 +30,7 @@ def plot_segment_list(df):
         ax = plot_axis(df, axn, ax=ax)
 
     # Map sub-segment names ( a,c,d) to matplotlib colors.
-    # The color here is actually he one that edns the segment, but it is
+    # The color here is actually the one that ends the segment, but it is
     # interpreted as the one that starts it.
     cm = {'a': 'b',
           'c': 'r',
