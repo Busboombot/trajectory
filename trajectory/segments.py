@@ -441,6 +441,9 @@ class JointSegment(object):
 
         return f"[{color(str(a), fg='green')} {bold(xa)} : {bold(c)}@{color(str(vc), fg='blue')} : {bold(xd)} {color(str(d), fg='red')}]"
 
+    def __repr__(self):
+        return self.__str__()
+
     def debug_str(self):
         from colors import color
 
@@ -457,6 +460,7 @@ class Segment(object):
     """One segment, for all joints"""
 
     def __init__(self, prior:'Segment', n: int, joint_segments: List[JointSegment]):
+
         self.joint_segments = joint_segments
 
         self.seg_number = n
@@ -573,7 +577,8 @@ class Segment(object):
 class SegmentList(object):
 
     positions: List[float] # Positions after last movement addition
-    segments: deque
+    segments: deque[Segment]
+    all_segments: List[Segment] # All of the segments, unprocessed
 
     def __init__(self, joints: List[Joint]):
 
@@ -586,24 +591,22 @@ class SegmentList(object):
 
         self.segments = deque()
         self.positions = [0] * len(self.joints)
-
         self._sub_segments = []
+        self.all_segments = []
 
-    def add_distance_segment(self, joint_distances: List[int], v0: List[float] = None):
-        """Add a new segment, with joints expressing joint distance """
+    def add_distance_segment(self, joint_distances: List[int]):
+        """Add a new segment, with joints expressing joint distance
+        :type joint_distances: object
+        """
 
         assert len(joint_distances) == len(self.joints)
-
-        if len(self.segments) > 0 and v0 is not None:
-            raise SegmentError("Can only set initial velocity on first segment")
 
         # Update directions that may be zero
 
         self.positions = [x0 + x1 for x0, x1 in zip(self.positions, joint_distances)]
 
         # Assume missing velocities are zero.
-        if v0 is None:
-            v0 = [0] * len(self.joints)
+        v0 = [0] * len(self.joints)
 
         if len(self.segments):
             prior_seg = self.segments[-1] # Soon to be the second to last.
@@ -621,14 +624,11 @@ class SegmentList(object):
             for ss in s.sub_segments:
                 self._sub_segments.append(ss)
 
+        self.all_segments.append(next_seg)
+
         return next_seg
 
-
-    def add_position_segment(self, positions: List[float], v0: List[float] = None):
-
-        distances = [x1 - x0 for x0, x1 in zip(self.positions, positions)]
-
-        return self.add_distance_segment(distances, v0)
+    rmove = add_distance_segment
 
     def validate(self):
         for s in self.segments:
@@ -921,3 +921,6 @@ class SimSegment(object):
     # def __repr__(self):
     #    return '{:<10.6} t={:<8.4f} x={:<8.0f} n={:<6d} cn={:<8.4f} xn={:<6.0f} vn={:<6.0f}' \
     #        .format(self.tn / TIMEBASE, self.tf, self.x, self.n, self.cn, self.xn, self.vn)
+
+
+__all__ = ['SegmentList', 'Segment', 'Joint', 'JointSegment', 'SegmentError', 'SimSegment']
