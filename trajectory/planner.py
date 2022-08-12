@@ -227,6 +227,9 @@ class JointSegment(object):
                 self.v_1_max = 0
             else:
                 self.v_1_max = max_v_0(self.next_js.x, self.joint.a_max)
+        else:
+            # No next segment
+            self.v_1_max = 0
 
         if self.v_c > self.v_1_max:
             self.v_1 = self.v_1_max
@@ -251,7 +254,11 @@ class JointSegment(object):
             t_c = self.t_c
         else:
             v_c = self.x_c / self.t_c
-            t_c = self.x_c / self.v_c
+
+            try:
+                t_c = self.x_c / self.v_c
+            except ZeroDivisionError:
+                t_c = self.t_c
 
         self.v_c = min(max(v_c, 0), self.joint.v_max)
         self.v_1 = min(self.v_1_max, self.v_c)
@@ -379,6 +386,7 @@ class Segment(object):
 
     def update(self):
 
+
         for js in self.joint_segments:
             js.update_v_0()
 
@@ -437,6 +445,8 @@ class SegmentList(object):
             next_seg.link(self.segments[-1])
 
         self.segments.append(next_seg)
+
+
 
         return next_seg
 
