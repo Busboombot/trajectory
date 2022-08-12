@@ -1,7 +1,7 @@
 """Routines for plotting segments"""
 
 import pandas as pd
-
+import matplotlib.pyplot as plt
 
 def sel_axis(df, axis):
     t = df[df.axis == axis].copy()
@@ -18,13 +18,15 @@ def plot_axis(df, axis, ax=None):
 
     t = sel_axis(df, axis)
 
-    ax = t[['v_f']].plot(ax=ax, figsize=(20, 3))
+    ax = t[['v_f']].plot(ax=ax)
 
     return ax
 
 
-def plot_segment_list(df):
-    ax = None
+def plot_segment_list(df, ax=None):
+
+    if ax is None:
+        fig, ax = plt.subplots(1,1, figsize=(20,3))
 
     for axn in df.axis.unique():
         ax = plot_axis(df, axn, ax=ax)
