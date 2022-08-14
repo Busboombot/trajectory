@@ -84,6 +84,7 @@ class ConstraintError(SegmentError):
 class ValidationError(SegmentError):
     pass
 
+
 class TimeRecalc(SegmentError):
     """We need to recalc segment time"""
     pass
@@ -96,15 +97,16 @@ def accel_tx(v0, v1, a):
 
     return abs(((v0 + v1) / 2) * dt), abs(dt)  # Area of velocity trapezoid
 
+
 def t_accel(vi, vf, a):
-        """Time to accelerate from vi to vf"""
-        return (vf - vi) / a
+    """Time to accelerate from vi to vf"""
+    return (vf - vi) / a
+
 
 def t_accel_x(x, v, a):
     """Time required to move distance x, accelerating  from velocity vi"""
 
-
-    return sqrt(2*a*x+v**2)/a - (v/a)
+    return sqrt(2 * a * x + v ** 2) / a - (v / a)
 
 
 def max_v0_for_x(x, a):
@@ -126,6 +128,16 @@ def v_c_max(self, x, v_0, v_1, a):
     vd = v_1 + a * td
 
     return min(va, vd)
+
+def nearly_equal_velocity(a, b):
+    """Close enough not to trigger an update"""
+    try:
+        return abs(a-b)/abs(a+b) < .02
+    except ZeroDivisionError:
+        return a == b # Must still check b/c options are either a == b == 0 or a == -b
+
+def nearly_equal_time(a, b):
+    return abs(a-b)/abs(a+b) < .02
 
 class Joint(object):
     """Represents a single joint, with a maximum velocity and acceleration"""
@@ -162,9 +174,6 @@ class SubSegment(object):
         dir = '' if self.direction > 0 else '-'
 
         return f"<{self.joint.n} {self.ss} {self.t:2.5f} {int(self.x):5d} {self.v_i:5.0f}->{self.v_f:5.0f}> "
-
-
-from dataclasses import dataclass
 
 
 class JSClass(Enum):
@@ -218,7 +227,6 @@ kind_icon_map = {
 }
 
 
-
 class JointSegment(object):
     """One segment for one joint"""
 
@@ -245,7 +253,6 @@ class JointSegment(object):
     v_1: float = 0
     v_1_max: float  # Don't allow updating v_1
 
-    kind: JSClass
 
     params = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d', 'v_1',
               'v_1_max']
@@ -270,8 +277,6 @@ class JointSegment(object):
 
         self.next_js = None
         self.prior_js = None
-
-        self.kind = JSClass.UNK
 
         self.reset()
 
@@ -310,14 +315,24 @@ class JointSegment(object):
 
         # initial guess at minimum time, which is the distance at a consistant
         # max velocity. This time will get bumped up as we recalc
-        self.t = self.x/vc_m # self.t_a + self.t_c + self.t_d
+        self.t = self.x / vc_m  # self.t_a + self.t_c + self.t_d
 
         self.err_x = 0
+
+    def reset_for_append(self):
+        """Perform the resets required when another segment is appended, such
+        as removing the v_1_max of 0"""
+
+        self.v_1_max = self.joint.v_max
+
 
     def update_boundary_velocities(self):
         """v_1_max may need to be specified if the next segment has a very short
         travel, or zero, because it may not be possible to decelerate during the phase.
         For instance, if next segment has x=0, then v_1 must be 0 """
+
+        v_0_o, v_1_o = self.v_0, self.v_1
+        v_0_max_o, v_1_max_o = self.v_0_max, self.v_1_max
 
         if self.x == 0:
             self.v_0 = 0
@@ -338,7 +353,7 @@ class JointSegment(object):
             else:
                 # Later segments must have a incomming velocity to match
                 # the prior segments outgoing velocity
-                self.v_0_max = self.joint.v_max
+                self.v_0_max = min(self.joint.v_max, self.v_0_max) # min() reduces instability
 
             if self.next_js:
                 if self.dir != self.next_js.dir:
@@ -351,7 +366,7 @@ class JointSegment(object):
                 else:
                     # The next segment is just the normal case so just match the
                     # velocities across the boundary.
-                    self.v_1_max = self.joint.v_max
+                    self.v_1_max = min(self.joint.v_max, self.v_1_max) # min() reduces instability
             else:
                 # No next segment, so we have to decel to zero.
                 self.v_1_max = 0
@@ -365,15 +380,39 @@ class JointSegment(object):
         # and acceleration in the decel phase, because this handles the case of very
         # small movements.
 
-        x, t = accel_tx(self.v_0_max, 0, self.joint.a_max) # Recompute time and dist in acell phase
+        x, t = accel_tx(self.v_0_max, 0, self.joint.a_max)  # Recompute time and dist in acell phase
         self.v_1_max = min(max_v0_for_x(self.x - x, self.joint.a_max), self.v_1_max)
 
-        self.v_0 = self.v_0_max
-        self.v_1 = self.v_1_max
+        if self.v_0 > self.v_0_max:
+            self.v_0 = self.v_0_max
+
+        if self.v_1 > self.v_1_max:
+            self.v_1 = self.v_1_max
+
+        ## Change reporting
+
+        if not nearly_equal_velocity(self.v_0_max, v_0_max_o):
+            self.segment.mark_for_update(f'{self.id} ubv_v0max {v_0_max_o}->{self.v_0_max}')
+            self.segment.mark_prior_for_update(f'{self.id} ubv_v0max {v_0_max_o}->{self.v_0_max}')
+
+        if not nearly_equal_velocity(self.v_1_max, v_1_max_o):
+            self.segment.mark_for_update(f'{self.id} ubv_v1max {v_1_max_o}->{self.v_1_max}')
+            self.segment.mark_next_for_update(f'{self.id} ubv_v1max {v_1_max_o}->{self.v_1_max}')
+
+        if not nearly_equal_velocity(self.v_0, v_0_o):
+            self.segment.mark_for_update(f'{self.id} ubv_v0 {v_0_o}->{self.v_0}')
+            self.segment.mark_prior_for_update(f'{self.id} ubv_v0 {v_0_o}->{self.v_0}')
+
+        if not nearly_equal_velocity(self.v_1, v_1_o):
+            self.segment.mark_for_update(f'{self.id} ubv_v0 {v_1_o}->{self.v_1}')
+            self.segment.mark_prior_for_update(f'{self.id} ubv_v0 {v_1_o}->{self.v_1}')
 
 
     def recalc(self):
         """Re-calculate v_c and v_1, based on  total distance and velocity limits"""
+
+        v_0_o, v_1_o = self.v_0, self.v_1
+        v_0_max_o, v_1_max_o = self.v_0_max, self.v_1_max
 
         if self.prior_js:
             self.v_0 = self.prior_js.v_1
@@ -390,9 +429,16 @@ class JointSegment(object):
         self.t_c = self.segment.t - self.t_a - self.t_d
 
         if self.t_c < 0:
-            self.t_c = 0; # This will cause x error that will get fixed on the next recalc
+            self.t_c = 0;  # This will cause x error that will get fixed on the next recalc
             raise TimeRecalc(f'{self.x_c}|{self.segment.t} {self.t_a},{self.x_a} {self.t_d},{self.x_d}')
             self.t = self.t_a + self.t_d
+            self.segment.mark_for_update(f'{self.id} rc_tc_lt0')
+
+        if self.x_c < 0:
+            self.segment.mark_for_update(f'{self.id} rc_xc_lt0')
+            #self.x_c = 0;  # This will cause x error that will get fixed on the next recalc
+            #raise TimeRecalc(f'{self.x_c}|{self.segment.t} {self.t_a},{self.x_a} {self.t_d},{self.x_d}')
+            pass
 
         # Re calc cruise velocity, and try to set the exit velocity to be
         # the same as the cruise velocity
@@ -400,7 +446,13 @@ class JointSegment(object):
         v_c = 0 if self.t_c == 0 else self.x_c / self.t_c
 
         self.v_c = min(max(v_c, 0), self.joint.v_max)
-        self.v_1 = min(self.v_1_max, self.v_c)
+
+        v_1 = min(self.v_1_max, self.v_c)
+
+        if not nearly_equal_velocity(self.v_1,v_1):
+            self.segment.mark_for_update(f'{self.id} rc_v1_change {self.v_1}->{v_1}')
+            self.segment.mark_next_for_update(f'{self.id} rc_v1_change {self.v_1}->{v_1}')
+            self.v_1 = v_1
 
         # Recalculate segment time, which may differ from self.segment.t.
         # Later, we will collect these, re-calc the segment time ( it may get longer )
@@ -411,9 +463,19 @@ class JointSegment(object):
         # that on the next recalc, because if it isn't there will be err_t
         t_c = self.x_c / self.v_c if self.v_c != 0 else 0
 
-        self.t = t_c + self.t_a + self.t_d
+        t = t_c + self.t_a + self.t_d
+
+        if self.t != t:
+            self.segment.mark_for_update(f'{self.id} rc_t_change {t}')
+            self.t = t
 
         self.err_x = self.x - self.calc_x
+
+        if not nearly_equal_velocity(v_0_max_o,self.v_0_max):
+            self.segment.mark_prior_for_update(f'{self.id} rc_v0max  {v_0_max_o}->{self.v_0_max}')
+
+        if not nearly_equal_velocity(v_1_max_o, self.v_1_max):
+            self.segment.mark_prior_for_update(f'{self.id} rc_v1max {v_1_max_o}->{self.v_1_max}')
 
         return True
 
@@ -433,7 +495,7 @@ class JointSegment(object):
     @property
     def min_t(self):
         return self.t
-        #return max(self.min_transit_t, self.min_accel_time)
+        # return max(self.min_transit_t, self.min_accel_time)
 
     @property
     def min_transit_t(self):
@@ -471,7 +533,7 @@ class JointSegment(object):
             ta = abs(t_accel_x(x / 2, self.v_c_max, a))
             td = abs(t_accel_x(x / 2, self.v_c_max, a))
 
-            return ta+td
+            return ta + td
         else:
             return t_a + t_d + x / self.v_c_max
 
@@ -487,9 +549,29 @@ class JointSegment(object):
         return x_a + x_c + x_d
 
     @property
+    def calc_t(self):
+        """Calculate the time required for each subseg from the distance an velocity"""
+
+        try:
+            t_a = 2 * self.x_a / (self.v_0 + self.v_c)
+        except ZeroDivisionError:
+            t_a = 0
+
+        try:
+            t_d = 2 * self.x_d / (self.v_c + self.v_1)
+        except ZeroDivisionError:
+            t_d = 0
+
+        try:
+            t_c = self.x_c/self.v_c
+        except ZeroDivisionError:
+            t_c = 0
+
+        return t_a + t_c + t_d
+
+    @property
     def sum_x(self):
         """Calculate the distance from the individual components distances"""
-
         return self.x_a + self.x_c + self.x_d
 
     @property
@@ -564,11 +646,16 @@ class JointSegment(object):
 class Segment(object):
     """One segment, for all joints"""
 
+    n: int = None;
     next_seg: "Segment" = None
     prior_seg: "Segment" = None
     t: float = 0
 
+    needs_update: bool = False
+
     n_updates: int = 0
+
+    updates: List[str]
 
     def __init__(self, n, joint_segments: List[JointSegment]):
 
@@ -580,16 +667,40 @@ class Segment(object):
 
         self.n_updates = 0
 
+        self.updates = []
+
+    def mark_for_update(self, reason=None):
+        self.needs_update = True
+
+        if reason:
+            self.updates.append(reason)
+
+
+    def mark_next_for_update(self, reason=None):
+        if self.next_seg:
+            self.next_seg.mark_for_update(reason)
+
+    def mark_prior_for_update(self, reason=None):
+        if self.prior_seg:
+            self.prior_seg.mark_for_update(reason)
+
+
+    def clear_needs_update(self):
+        self.needs_update = False
+
     def reset(self):
         for js in self.joint_segments:
             js.reset()
+
+    def reset_for_append(self):
+        for js in self.joint_segments:
+            js.reset_for_append()
 
     def recalc(self):
         need_tc = False;
 
         for s in self.joint_segments:
             need_tc = not s.recalc() or need_tc
-
 
     def link(self, prior_segment: "Segment"):
         """Link segments together"""
@@ -607,30 +718,24 @@ class Segment(object):
                 js.prior_js.update_boundary_velocities()
             js.update_boundary_velocities()
 
-
     def update_segment_time(self):
         t = [js.min_t for js in self.joint_segments]
         self.t = max(t)
 
-
-
     @property
     def err_t(self):
         """RMS error between joint segment calculated times and segment time"""
-        try:
-            return sqrt(sum([(js.t - self.t) ** 2 for js in self.joint_segments]))
-        except TypeError:
-            # b/c self.t not set
-            return MAX_ERR_T * 10  # Just needs to be bigger than MAX_ERR_T
+        err = sqrt(sum([(js.t - self.t) ** 2 for js in self.joint_segments]))
+
+        return err/len(self.joint_segments)/self.t
 
     @property
     def err_x(self):
         """RMS error between joint segment calculated times and segment time"""
-        try:
-            return sqrt(sum([(js.err_x) ** 2 for js in self.joint_segments]))
-        except TypeError:
-            # b/c self.t not set
-            return MAX_ERR_T * 10  # Just needs to be bigger than MAX_ERR_T
+        dist = sum(js.x for js in self.joint_segments)
+        err =  sqrt(sum([(js.err_x) ** 2 for js in self.joint_segments]))
+
+        return err/dist
 
     def update_min_time(self):
         self.t = self.min_t
@@ -677,14 +782,18 @@ class SegmentList(object):
                            [JointSegment(j, x=x) for j, x in zip(self.joints, joint_distances)])
 
         if len(self.segments) > 0:
+            self.segments[-1].reset_for_append()
             self.segments[-1].next_segment = next_seg
             next_seg.prior_seg = self.segments[-1]
             next_seg.link(self.segments[-1])
 
+
         self.segments.append(next_seg)
+
 
         if update:
             self.update(next_seg)
+            # Possibly run several rounds of updates to get the total error down.
 
         return next_seg
 
@@ -692,24 +801,40 @@ class SegmentList(object):
         for s in self.segments:
             s.reset()
 
-    def recalc(self):
-        for s in self.segments:
+    def _lim_segments(self, limit=4):
+        if limit:
+            return list(self.segments)[-limit:]
+        else:
+            return list(self.segments)
+
+    def recalc(self, limit=3):
+        for s in self._lim_segments(limit):
             s.recalc()
 
-    def update(self, s, limit=4):
+    def update_min_time(self, limit=4):
+        for s in self._lim_segments(limit):
+            s.update_min_time()
 
-        s.update_min_time()
+    def update(self, s=None):
 
-        s.update_boundary_velocities()
+        if s:
+            s.update_boundary_velocities()
+            s.update_segment_time()
 
-        self.recalc()
+        for i in range(4):
+            for s in self.segments:
+                if s.needs_update:
+                    s.update_boundary_velocities()
+                    s.update_segment_time()
+                    s.recalc()
+                    s.clear_needs_update()
 
+            if self.count_needs_update() == 0:
+                break
 
     def err_t(self, limit=4):
-        if limit:
-            l = list(self.segments)[-4:]
-        else:
-            l = list(self.segments)
+
+        l = self._lim_segments(limit)
 
         et = sum([s.err_t for s in l]) / len(l)
 
@@ -718,14 +843,9 @@ class SegmentList(object):
 
         return et
 
-
     def err_x(self, limit=4):
-        if limit:
-            l = list(self.segments)[-4:]
-        else:
-            l = list(self.segments)
 
-        return [s.err_x for s in l]
+        l = self._lim_segments(limit)
 
         et = sum([s.err_x for s in l]) / len(l)
 
@@ -734,6 +854,8 @@ class SegmentList(object):
 
         return et
 
+    def count_needs_update(self):
+        return sum( s.needs_update for s in self.segments)
 
     @property
     def dataframe(self):
@@ -741,7 +863,7 @@ class SegmentList(object):
         rows = []
 
         for ss in self.subsegments:
-            rows.append([ None, ss.joint.n, ss.x, ss.v_i, ss.v_f, ss.ss, ss.t])
+            rows.append([None, ss.joint.n, ss.x, ss.v_i, ss.v_f, ss.ss, ss.t])
 
         df = pd.DataFrame(rows, columns=' t axis x v_i v_f ss del_t'.split())
 
@@ -767,19 +889,24 @@ class SegmentList(object):
         rows = []
         for i, s in enumerate(self.segments):
             for j, js in enumerate(s.joint_segments):
-                d = (i, j, js.segment.t) + ag(js) + (js.calc_x,js.sum_x)
+                d = (i, j, js.segment.t) + ag(js) + (js.calc_x, js.sum_x, js.calc_t)
                 rows.append(d)
 
-        return pd.DataFrame(rows, columns=['seg', 'js', 'seg_t'] + JointSegment.params + ['calc_x', 'sum_x'])
+        df =  pd.DataFrame(rows, columns=['seg', 'js', 'seg_t'] + JointSegment.params + ['calc_x', 'sum_x', 'calc_t'])
+
+        for c in ['v_c','v_0_max','v_1_max','v_0','v_1', 'calc_x','sum_x']:
+            df[c] = df[c].astype('int')
+
+        for c in ['seg_t','t','t_a','t_d','t_c']:
+            df[c] = df[c].round(5)
+
+        return df
 
     @property
     def subsegments(self):
-        from itertools import chain
 
         for s in self.segments:
             yield from s.subsegments
-
-
 
     def __getitem__(self, item):
         """Return a joint segment by the id"""
@@ -797,6 +924,9 @@ class SegmentList(object):
 
     def __str__(self):
         return '\n'.join(str(s) for s in self.segments)
+
+    def _repr_pretty_(self, p, cycle):
+        p.text(str(self) if not cycle else '...')
 
     def debug_str(self):
         return '\n'.join(s.debug_str() for s in self.segments)
