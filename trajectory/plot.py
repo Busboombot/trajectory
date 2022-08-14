@@ -34,12 +34,12 @@ def plot_segment_list(df, ax=None):
     # Map sub-segment names ( a,c,d) to matplotlib colors.
     # The color here is actually the one that ends the segment, but it is
     # interpreted as the one that starts it.
-    cm = {'a': 'b',
-          'c': 'r',
-          'd': 'g'}
+    cm = {'a': ('b',3),
+          'c': ('r',3),
+          'd': ('g',3)}
 
     for idx, row in sel_axis(df, 0).iterrows():
         #rectangle = plt.Rectangle((idx,0), row.del_t, row.v_f, fc=cm[row.ss], alpha=0.05)
         #plt.gca().add_patch(rectangle)
 
-        ax.axvline(x=idx, color=cm[row.ss], alpha=.5, lw= 3 if row.ss == 'd' else 1)
+        ax.axvline(x=idx, color='k', alpha=.5, lw=1)

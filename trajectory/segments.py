@@ -628,8 +628,6 @@ class SegmentList(object):
 
         return next_seg
 
-    rmove = add_distance_segment
-
     def validate(self):
         for s in self.segments:
             s.validate()
