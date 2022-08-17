@@ -152,15 +152,27 @@ def simplify_pentagon(x, t, v_0, v_c, v_1, a):
 
     # v_c = 2*br_x/(t+br_t)
 
-    return  br_t, tt_x, v_max
+    return br_t, tt_x, v_max
 
 
 def trap_v_c(x, t, a):
     """Height ( v_c) of a trapezoid of area x and base width t"""
     from math import sqrt
 
-    v = a * t / 2 - sqrt(a * (a * t ** 2 - 4 * x)) / 2
-    return v
+    # This is based on an equation from SymPy
+    v_c_ = a * t / 2 - sqrt(a * (a * t ** 2 - 4 * x)) / 2
+
+    # This is the equation worked out by hand
+    x_f = a * t ** 2 / 4  # Area of the whole triangle. Our x is the trap at the bottom
+    x_t = x_f - x  # Area of the triangle above our trapezoid
+    t_c = sqrt(4 * x_t / a)  # t_c is both the total time for the top triangle, and the cruise time for our trap
+
+    t_a = t_d = (t - t_c) / 2  # acelleration and decel times
+    v_c = a * t_a  # v_c is at the end of the acel time
+
+    assert round(v_c_, 5) == round(v_c)
+
+    return v_c
 
 
 def penta_area(t, v_0, v_c, v_1, a):
@@ -268,21 +280,40 @@ def max_v1(x, t, v_0, v_c, a_max, **kwds):
 
     return Params(t, x, t_a, t_c, t_d, x_a, x_c, x_d, v_0, v_c, v_1, is_triangle, ip)
 
+class TrapMathError(Exception):
+    pass
+
+class ShortTimeError(TrapMathError):
+    pass
+
 
 def penta_v_c(x, t, v_0, v_1, a):
     """ Find the v_c for a pentagon, through decompositions
 
-    /--------------------
-   /                     \
-  /          T            \
- / ________________________\
-|        B2               |S\
-|_________________________|__\
-|        B1                  |
-------------------------------
+    For an arbitrary pentagon, and some other reduced shapes, this routine
+    will break the pentagon into four regons, trivially calculting the
+    areas of the first three ( B1, S, B2 ) then with the remaining area in T,
+    calculate Vc.
+
+            /--------------------          Vc
+           /                     \
+          /          T            \
+         / ________________________\       Vmax ( V0 )
+        |        B2               |S\
+        |_________________________|__\     Vmin ( V1 )
+        |        B1                  |
+        ------------------------------
+
+
     """
 
     x_i = x
+
+    if x == 0 or t == 0:
+        return 0
+
+    if v_0 == v_1:
+        return v_0
 
     v_max = max(v_1, v_0)
     v_min = min(v_1, v_0)
@@ -302,12 +333,17 @@ def penta_v_c(x, t, v_0, v_1, a):
     x_t = x - x_st - x_b1 - x_b2
     t_t = t_b2
 
-    v_c = trap_v_c(x_t, t_t, a)
+    if round(x_t) == 0:
+        return v_max
 
-    return v_c + v_max
+    if t_t <= 0 and round(x) > 0:
+        raise ShortTimeError('No time left for v_c')
 
+    try:
+        v_c = trap_v_c(x_t, t_t, a) + v_max
+    except ValueError as e:
+        print('!!!', x_t, .5 * a * t_t**2, t_t, sqrt( 2*x_t/a))
+        raise
 
-t, v_0, v_c, v_1, a = (1, 4000, 2000, 4000, 50_000)
-x = penta_area(t, v_0, v_c, v_1, a)
+    return v_c
 
-x, t, v_c, penta_v_c(x, t, v_0, v_1, a)
