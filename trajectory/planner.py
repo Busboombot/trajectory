@@ -44,6 +44,8 @@ from warnings import warn
 
 import pandas as pd
 
+from .trapmath import *
+
 ## Parameters for simulation/step generation
 
 # NUmber of ticks of the step function per second
@@ -95,54 +97,6 @@ class ShortSegment(SegmentError):
 class TimeRecalc(SegmentError):
     """We need to recalc segment time"""
     pass
-
-
-def accel_tx(v0, v1, a):
-    """Distance required to accelerate from v0 to v1 at acceleration a"""
-
-    dt = (v1 - v0) / a  # Time to change from v0 to v1 at max acceleration
-
-    return abs(((v0 + v1) / 2) * dt), abs(dt)  # Area of velocity trapezoid
-
-
-def t_accel(vi, vf, a):
-    """Time to accelerate from vi to vf"""
-    return (vf - vi) / a
-
-
-def t_accel_x(x, v, a):
-    """Time required to move distance x, accelerating  from velocity vi"""
-
-    return sqrt(2 * a * x + v ** 2) / a - (v / a)
-
-
-def max_v0_for_x(x, a):
-    """Maximum V0 for segment to allow decelereration and not cover more than
-        distance x; it sets the v_0_max"""
-
-    return sqrt(2 * x * a)
-
-def max_v0_for_xt(x, a):
-    """Maximum V0 for segment to allow decelereration and not cover more than
-        distance x in  time t; it sets the v_0_max"""
-
-    return (2*x - v)
-
-def v_c_max(x, v_0, v_1, a):
-    """Velocity after accelerating for x/2 from the start and end,
-    the highest velocity for which t_c is positive.
-    This is the maximum achievable velocity before deceleration must begin. """
-    ta = t_accel_x(x / 2, v_0, a)
-    va = v_0 + a * ta
-
-    td = t_accel_x(x / 2, v_1, a)
-
-    vd = v_1 + a * td
-
-    # The averaging produces some error, but it is small for reasonable x,
-    # larger than 100, and with reasonable a_max
-
-    return (va + vd) / 2
 
 
 def nearly_equal_velocity(a, b):
@@ -294,7 +248,10 @@ class JSClass(Enum):
     ╱╲  A Triangle. Fixed V0, V1, too short for vc
           x is non zero but is too short got velocity to reach v_max
 
-    ╱▔╲ T Trapezoid.  Fixed V0, V1, max vc
+    ╱-╲ T Trapezoid.  V0 & V1 == 0, max vc
+          Normal case where v0 and v1 are both below Vc, and the segment isn't short.
+
+    ╱▔╲ P pentagon.  Fixed V0, V1, but not zero, max vc
           Normal case where v0 and v1 are both below Vc, and the segment isn't short.
 
     ▔▔▔ C Constant V. Prior and next have high V0, V1
@@ -313,29 +270,57 @@ class JSClass(Enum):
     """
     ACEL = 'U'
     TRIANGLE = 'A'
+    PENTAGON = 'P'
     AT = 'AT'  # A or T, pinned to Zero at start and finish
     TRAPZEZOID = 'T'
+    TROUGH = 'R'
     CONSTANT = 'C'
     DECEL = 'D'
     CLIFF = 'L'
     DL = 'DL'  # D or L
     ZERO = 'Z'
+
     UNK = '?'
 
 
 kind_icon_map = {
     JSClass.ACEL: '╱▔▔',
     JSClass.TRIANGLE: '╱╲',
-    JSClass.AT: '╱▔╲ ╱╲',
-    JSClass.TRAPZEZOID: '╱▔╲',
+    JSClass.TRAPZEZOID: '╱-╲',
+    JSClass.PENTAGON: '╱▔╲',
+    JSClass.TROUGH: '╲▁╱',
     JSClass.CONSTANT: '▔▔▔ ',
     JSClass.DECEL: '╲▁▁',
     JSClass.CLIFF: '▔▔╲',
-    JSClass.ZERO: ' ▁▁▁',
-    JSClass.DL: '╲▁▁▔▔╲',
+    JSClass.ZERO: '▁▁▁',
     JSClass.UNK: '?'
 }
 
+def classify(x, v_0, v_1, v_max, a_max):
+
+    x_a, t_a = accel_tx(v_0, v_max, a_max)
+    x_d, t_d = accel_tx(v_max, v_1, a_max)
+
+    if x == 0:
+        return JSClass.ZERO
+    elif v_0 == 0 and v_1 == 0:
+        if x_a + x_d > x:
+            return JSClass.TRIANGLE
+        else:
+            return JSClass.TRAPZEZOID
+    elif v_0 != 0 and v_1 != 0:
+        x_break = (v_0 + v_1) / 2 * (t_a + t_d)
+        return JSClass.PENTAGON if x > x_break else JSClass.TROUGH
+    elif v_0 == 0 and v_1 != 0:
+        return JSClass.ACEL
+    elif v_0 != 0 and v_1 == 0:
+        x_break = (v_0 + v_1) / 2 * (t_a+t_d)
+        return JSClass.CLIFF if x > x_break else JSClass.DECEL
+    elif v_0 == v_1:
+        return JSClass.CONSTANT
+
+    else:
+        return JSClass.UNK
 
 class JointSegment(object):
     """One segment for one joint"""
@@ -388,20 +373,22 @@ class JointSegment(object):
         self.next_js = None
         self.prior_js = None
 
+        self.needs_update_boundaries = False
+        self.needs_recalc = False
+
         self.reset()
 
     def mark_need_recalc(self):
         self.segment.needs_recalc = True
 
-    def mark_update_boundaries(self):
-        if self.next_js:
-            self.next_js.segment.needs_update_boundaries = True
-
     def set_v_0(self, v):
         v_0 = min(self.v_0_max, v)
         if v_0 != self.v_0:
             self.v_0 = v_0
-            self.mark_need_recalc()
+
+            # Mark the prior segment for updating v_1
+            if self.prior_js and self.prior_js.v_1 != self.v_0:
+                self.prior_js.segment.needs_update_boundaries = True
 
     def set_v_0_max(self, v):
         assert v<=self.v_0_max, f'Should not be increasing v_0_max ({self.v_0_max}->{v})'
@@ -413,8 +400,6 @@ class JointSegment(object):
         v_1 = min(self.v_1_max, v)
         if v_1 != self.v_1:
             self.v_1 = v_1
-            self.mark_need_recalc()
-            self.mark_update_boundaries()
 
     def set_v_1_max(self, v):
         assert v <= self.v_1_max, 'Should not be increasing v_1_max'
@@ -459,8 +444,6 @@ class JointSegment(object):
         # max velocity. This time will get bumped up as we recalc
         self.t = self.x / vc_m  # self.t_a + self.t_c + self.t_d
 
-
-
     def initialize(self):
         self.update_boundary_velocities()
         self.set_initial_parameters()
@@ -469,15 +452,18 @@ class JointSegment(object):
         """Perform the resets required when another segment is appended, such
         as removing the v_1_max of 0"""
 
-        self.reset()
-        self.initialize()
+        self.v_1_max = self.joint.v_max
+        self.update_boundary_velocities()
+        #self.reset()
+        #self.initialize()
+
 
     def set_initial_parameters(self):
         """Set initial values, which will get adjusted later as we link up adjacent
         segments. But these are pretty good guesses"""
 
         if self.x == 0:
-            self.v_0 = 0
+            self.set_v_0(0)
             self.v_0_max = 0
             self.v_1_max = 0
             self.v_c_max = 0
@@ -492,7 +478,7 @@ class JointSegment(object):
 
             v_0_max = min(max_v0_for_x(self.x, self.joint.a_max), self.joint.v_max, self.v_0_max)
 
-            p = inital_parameters(self.x, v_0_max, self.joint.v_max, self.v_1_max, self.joint.a_max)
+            p = inital_parameters(self.x, v_0_max, self.joint.v_max , self.v_1_max, self.joint.a_max)
             v_0 = v_0_max = p.v_0
 
             self.x_a = p.x_a
@@ -626,46 +612,65 @@ class JointSegment(object):
         self.set_v_0_max(v_0_max)
         self.set_v_1_max(v_1_max)
 
-
-    def link_velocities(self):
+    def link_velocities_forward(self):
         """Link the starting velocity in this segment to the end of the prior segment
 
         This should only be required when the v_1 of the prior segment changes.
         """
 
-        if self.prior_js:
+        if self.next_js:
+            if self.v_1 != self.next_js.v_0:
+                self.set_v_1(self.next_js.v_0)
 
-            if self.prior_js.v_1 > self.v_0_max:
-                raise BoundaryError(f'{self.id}: v_1 or prior segment exceeds v_0_max of this one')
+            if self.v_1_max > self.next_js.v_0_max:
+                self.set_v_1_max(self.next_js.v_0_max)
+        else:
+            assert False, "Should not have called this routine"
 
-            self.set_v_0(self.prior_js.v_1)
-            self.set_v_0_max(min(self.prior_js.v_1, self.v_0_max))
+    def link_velocities_backward(self):
+        """Link the starting velocity in this segment to the end of the prior segment
+
+        This should only be required when the v_1 of the prior segment changes.
+        """
+
+        if self.prior_js and self.v_0 != self.prior_js.v_1:
+                self.set_v_0(self.prior_js.v_1)
+                self.v_0_max = self.prior_js.v_1
 
     def recalc(self):
         """Re-calculate v_c and v_1, based on  total distance and velocity limits"""
 
-        self.v_0 = min(self.v_0, self.v_0_max)
-        self.v_1 = min(self.v_1, self.v_1_max)
+        self.set_v_0(min(self.v_0, self.v_0_max))
+        self.set_v_1(min(self.v_1, self.v_1_max))
 
         if self.x == 0:
             self.t_c = self.t = self.segment.t
             return
 
+        # Accel times and distances, assuming accel to self.v_c
         self.x_a, self.t_a = accel_tx(self.v_0, self.v_c, self.joint.a_max)
         self.x_d, self.t_d = accel_tx(self.v_c, self.v_1, self.joint.a_max)
 
         if self.x <= self.x_a + self.x_d:
 
-            # A triangle segment is weird because it will have t_c = 0, but a non-zero
-            # v_c. The v_c is just a target for accel and deccel
+            # The x break is the line, on the v vs t plot, from v_0 to v_1. If
+            # x is above the break, the a phase accelerates, and if it's below, the a
+            # phase decelerates. It is above the break, we have a triangle, below is a trough
+            x_break = (self.v_0 + self.v_1) / 2 * self.t
 
-            self.t_c = 0
-            self.x_c = 0
-
-            self.v_c = min(v_c_max(self.x, self.v_0, self.v_1, self.joint.a_max), self.joint.v_max)
+            if self.x > x_break:
+                # Triangle case ( will be trap after expansion )
+                # A triangle segment is weird because it will have t_c = 0, but a non-zero
+                # v_c. The v_c is just a target for accel and decel
+                self.v_c = self.x / self.t
+            else:
+                # Trough case. Similar to triangle, but v_c  = 0
+                self.v_c = 0
 
             self.x_a, self.t_a = accel_tx(self.v_0, self.v_c, self.joint.a_max)
             self.x_d, self.t_d = accel_tx(self.v_c, self.v_1, self.joint.a_max)
+            self.x_c = self.x - self.x_a - self.x_d
+            self.t_c = self.segment.t - self.t_a - self.t_d
 
         else:
             self.x_c = self.x - self.x_a - self.x_d
@@ -683,7 +688,6 @@ class JointSegment(object):
                 self.v_c = self.joint.a_max * self.t_a + self.v_0
 
             self.v_c = min(self.x_c / self.t_c, self.joint.v_max)
-            # self.t_c = self.x_c/self.v_c
 
         self.set_v_1(min(self.v_1_max, self.v_c))
 
@@ -692,21 +696,19 @@ class JointSegment(object):
         # the recalc all the joint segments, and do that repeatedly until
         # error is minimized.
 
-        t = self.t_c + self.t_a + self.t_d
+        self.t = self.t_c + self.t_a + self.t_d
 
-        if self.x > 0:
-            assert self.x_a + self.x_c + self.x_d > 0
-
-        if t == 0:
+        if self.t == 0: # Need to have some time in segment, even if no movement.
             self.t_c = self.segment.t
-            t = self.t_c + self.t_a + self.t_d
-
-        if self.t != t:
-            self.t = t
+            self.t = self.t_c + self.t_a + self.t_d
 
         # In this case, even if the distance is zero, we should not have a zero time;
         # it should have the segment tim.
         assert self.t > 0, 'Time should not be zero'
+
+        if self.x > 0:
+            assert self.x_a + self.x_c + self.x_d > 0
+
 
         return True
 
@@ -716,6 +718,10 @@ class JointSegment(object):
     @property
     def id(self):
         return f"{self.segment.n}/{self.joint.n}"
+
+    @property
+    def classify(self):
+        return classify(self.x, self.v_0, self.v_1, self.joint.v_max, self.joint.a_max)
 
     @property
     def is_triangle(self):
@@ -807,23 +813,6 @@ class JointSegment(object):
 
         return ss
 
-
-
-    @property
-    def classify(self):
-
-        if self.x == 0:
-            return JSClass.ZERO
-        elif self.v_0_max == 0 and self.v_1_max == 0:
-            return JSClass.AT
-        elif self.v_0_max == 0 and self.v_1_max != 0:
-            return JSClass.ACEL
-        elif self.v_0_max != 0 and self.v_1_max == 0:
-            return JSClass.DL
-        elif self.v_0_max != 0 and self.v_1_max != 0:
-            return JSClass.CONSTANT
-        else:
-            return JSClass.UNK
 
     def __str__(self):
         from colors import color, bold
@@ -950,6 +939,14 @@ class Segment(object):
         for js in self.joint_segments:
             js.update_boundary_velocities()
 
+    def link_velocities_forward(self):
+        for js in self.joint_segments:
+            js.link_velocities_forward()
+
+    def link_velocities_backward(self):
+        for js in self.joint_segments:
+            js.link_velocities_backward()
+
     def update_min_time(self):
         self.t = self.min_t
         assert self.t > 0
@@ -1035,6 +1032,20 @@ class Segment(object):
 
         return df
 
+    def save(self):
+        from operator import itemgetter
+        keys = ['x', 'dir', 't',
+                'v_0_max', 'v_1_max', 'v_c_max',
+                'x_a', 't_a', 'x_d', 't_d',  'v_0', 'v_c', 'x_c', 't_c', 'v_1' ]
+
+        ag = itemgetter(*keys)
+        return [ dict( zip(keys,ag(js.__dict__))) for js in self]
+
+    def load(self, d):
+
+        for js, e in zip(self.joint_segments,d):
+            for k, v in e.items():
+                setattr(js, k, v)
 
     @property
     def subsegments(self):
@@ -1043,7 +1054,6 @@ class Segment(object):
 
     def __iter__(self):
         return iter(self.joint_segments)
-
 
     def __getitem__(self, item):
         return self.joint_segments[item]
@@ -1081,27 +1091,49 @@ class SegmentList(object):
 
         assert len(joint_distances) == len(self.joints)
 
-        next_seg = self.new_segment((joint_distances))
+        s = self.new_segment((joint_distances))
 
         if len(self.segments) > 0:
 
-            self.segments[-1].next_segment = next_seg
-            next_seg.prior_seg = self.segments[-1]
-            next_seg.link(self.segments[-1])
+            self.segments[-1].next_segment = s
+            s.prior_seg = self.segments[-1]
+            s.link(self.segments[-1])
 
-        self.segments.append(next_seg)
+        self.segments.append(s)
 
-        if next_seg.prior_seg:
-            next_seg.prior_seg.initialize_for_append()
+        if s.prior_seg:
+            s.prior_seg.initialize_for_append()
 
-        next_seg.initialize()
+        s.initialize()
 
-        #self.update()
+        if update:
+            self.update(s)
 
-        return next_seg
+        return s
 
-    def update(self):
+    def has_discontinuity(self, s1, s2):
 
+        for js1, js2 in zip(s1, s2):
+            if js1.v_1 != js2.v_0:
+                return True
+
+    def update(self, s=None):
+
+        if s:
+
+            if s.prior_seg:
+                s.update_initial_parameters()
+                s.prior_seg.update()
+
+            s.link_velocities_backward()
+            s.update()
+
+            if s.prior_seg and self.has_discontinuity(s.prior_seg, s):
+                s.prior_seg.link_velocities_forward()
+                s.prior_seg.update()
+                s.update()
+
+        # One more for good measure
         for s in self:
             s.update()
 
@@ -1191,6 +1223,7 @@ class SegmentList(object):
         df = pd.concat(frames)
 
         return df
+
 
     @property
     def subsegments(self):
