@@ -44,9 +44,7 @@ class Params:
     ip: InputParams = None
     flag: str = None
     recalcs: int = 0
-    updated_v_0: bool = False
-    updated_v_1: bool = False
-    updated: bool = False # Set with updated_v_0 and updated_v_1
+    saved = None
 
     def __post_init__(self):
         self.d=sign(self.x)
@@ -65,6 +63,22 @@ class Params:
             (rd(self.t_c, 7), rd(self.v_c, 2), rd(self.v_c, 2), rd(self.x_c, 0),'c'),
             (rd(self.t_d, 7), rd(self.v_c, 2), rd(self.v_1, 2), rd(self.x_d, 0),'d')
         )
+
+    def store(self):
+        self.saved= [round(self.t,4), round(self.v_0), round(self.v_c), round(self.v_1)]
+
+    @property
+    def is_changed(self):
+
+        if self.saved is None:
+            return False
+
+        for p in zip(self.saved, [round(self.t,4), round(self.v_0), round(self.v_c), round(self.v_1)] ):
+
+            if p[0] != p[1]:
+                return True
+
+        return False
 
 class JSClass(Enum):
     """
@@ -229,28 +243,16 @@ def min_time_parameters(x, v_0, v_1, v_max, a_max):
             p = p.replace(recalcs=i)
             break
 
-    if p.v_0 != v_0:
-        p.updated_v_0 = p.updated = True
-
-    if p.v_1 != v_1:
-        p.updated_v_1 = p.updated = True
-
     return p
 
 
 
-def min_time_parameters_p(p: Params, inplace = False, as_needed=False):
+def min_time_parameters_p(p: Params, inplace = False):
     """construct the minimum time parameters from a Params object. Return
     a new Params by default, but with inplace=True copy into the object provided"""
 
     if p is None:
         return p
-
-    if as_needed and not any([p.updated, p.updated_v_0, p.updated_v_1]):
-        if inplace is False:
-            return p
-        else:
-            return
 
     ag = attrgetter(*'x v_0 v_1 v_max a_max'.split())
     p_ = min_time_parameters(*ag(p))
@@ -376,68 +378,6 @@ def _min_time_parameters(x, v_0, v_1, v_max, a_max, ip):
     return Params(x, t, t_a, t_c, t_d, x_a, x_c, x_d, v_0, v_c, v_1,
                   **base_params, t_min = t, ip=ip, flag=flag)
 
-def update_segment(joints: List[Params]) -> bool:
-
-    if all(e is None for e in joints):
-        return
-
-    for j in joints:
-        min_time_parameters_p(j, inplace=True)
-
-    min_time = max([e.t for e in joints])
-
-    for p in joints:
-        if p is not None:
-            try:
-                update_params(p, min_time)
-                assert_consistent_area(p)
-            except AssertionError:
-                print(p, min_time)
-                raise
-
-    # Signal if any of the joints had boundary velocities updated
-    return any([e.updated for e in joints])
-
-def update_params(p, t):
-    """Update parameters to consider segment time, and set
-    values for the ACD phases and Vc"""
-
-    p.t = t
-    p.v_c = hex_v_c(p.x, p.t, p.v_0, p.v_1, p.v_max, p.a_max)
-    p.x_a, p.t_a = accel_tx(p.v_0, p.v_c, p.a_max)
-    p.x_d, p.t_d = accel_tx(p.v_1, p.v_c, p.a_max)
-
-    if p.x_a + p.x_d > p.x:
-        # We're trying to increase the time for the segment, but v_0 and or
-        # v_1 are too large
-
-        # Going to need to move the velocities down. Just make them
-        # symmetric for now, but it would probably be better to
-        # move one down first.
-        p.v_0 = p.v_0_max = sqrt(2 * p.a_max * p.x/2)
-        p.v_1 = p.v_1_max = sqrt(2 * p.a_max * p.x/2)
-        p.updated_v_0 = p.updated_v_1 = p.updated = True
-
-        p.v_c = hex_v_c(p.x, p.t, p.v_0, p.v_1, p.v_max, p.a_max)
-        p.x_a, p.t_a = accel_tx(p.v_0, p.v_c, p.a_max)
-        p.x_d, p.t_d = accel_tx(p.v_1, p.v_c, p.a_max)
-
-        p.flag = 'R' # Signal recalc
-    else:
-        p.flag = 'C'
-
-    p.t_c = p.t - p.t_a - p.t_d
-
-    assert p.t_c >= 0
-
-    p.x_c = p.v_c * p.t_c
-
-    x = p.x_a + p.x_c + p.x_d
-
-    assert round(x) == round(p.x), (x, p.x, (p.x_a, p.x_c, p.x_d, p.flag))
-
-    return p
-
 def hex_area(t, v_0, v_c, v_1, a_max):
     """Return the area for a velocity hexagon"""
 
@@ -465,9 +405,17 @@ def hex_v_c(x, t, v_0, v_1, v_max, a_max):
     def f(v_c):
         x_ = hex_area(t, v_0, v_c, v_1, a_max)
         assert x_ is not None
+
         return abs(x - x_)
 
-    r = minimize_scalar(f, bounds=(0, v_max), method='bounded')
+
+
+    # There are a lot of cases where the velocity hexagon will have two
+    # solutions for v_c. We should (probably) always perfer the higher one.
+    # Using Brent, because I can't get Bounded to start at the top of the interval.
+    r = minimize_scalar(f, bracket=(v_max, 0), method='brent')
+
+    # r = minimize_scalar(f, bounds=(0, v_max), method='bounded')
     v_c = round(r.x)
 
     return v_c
@@ -476,13 +424,15 @@ def hex_v_c(x, t, v_0, v_1, v_max, a_max):
 # Group operations
 #####
 
+def uncap_end_segment(s: List[Params]):
+    """Remove the v=0 requirement on the last segment"""
 
-def clear_segment_flags(p):
+    for j in s:
+        if j:
+            j.v_1_max = j.v_1 = j.v_max
 
-    if not p:
-        return
-
-    p.updated_v_0 = p.updated_v_1 = p.updated = False
+def segment_changed(s: List[Params]):
+    return any([j.is_changed if j is not None else None for j in s])
 
 def assert_equal_area(a: Params, b: Params):
     """ Changing the area of a segment absolutely cannot be tolerated
@@ -525,113 +475,102 @@ def assert_unchanged_area(l: List[Params], memo:  List[Params]):
     for a, b in zip(l, memo):
         assert_equal_area(a,b)
 
-def mark_saved_change(l: List[Params], memo:  List[Params]):
-    """Mark changes between objects and their saved versions"""
 
-    changes = []
-
-    for a, b in zip(l, memo):
-        if a is not None and b is not None:
-            a.updated_v_0 = a.updated_v_0 or (round(a.v_0/2) != round(b.v_0/2))
-            a.updated_v_1 = a.updated_v_1 or (round(a.v_1/2) != round(b.v_1/2))
-            a.updated = a.updated_v_0 or a.updated_v_1
-
-            changes.append( (a.updated))
-        else:
-            changes.append((None))
-
-    return changes
-
-def segment_changed(s: List[Params]):
-
-    updated = False
-    if not s:
-        return False
-
-    for p in s:
-
-        updated = updated or p.updated if p is not None  else False
-
-    return updated
-
-def link_joints(a: Params, b: Params):
-    """ link two joints velocities and velocity limits.
-
-    For limits, assign the (min,max) of the (upper, lower) limit to
-    both sides.
-
-    For velocities, after setting limits, reset  a.v_1 to be
-    within velocity limits ( which are now the same for both sides )
-    and then assign a.v_1 to b.v_0
-
-    :param a:
-    :type a:
-    :param b:
-    :type b:
-    :return:
-    :rtype:
-    """
-
-    a.v_1_max = min(a.v_1_max, b.v_0_max)
-    a.v_1_max = b.v_0_max
-
-    a.v_1_min = max(a.v_1_min, b.v_0_min)
-    a.v_1_min = b.v_0_min
-
-    assert a.v_1_max >= a.v_1_min, f" v_a_max={a.v_1_max} < v_1_min={a.v_1_min}"
-
-    a.v_1 = max(min(a.v_1, a.v_1_max), a.v_1_min)
-    b.v_0 = a.v_1
-
-def enforce_limits(joint: Params):
-
-    if joint.x == 0:
-        joint.v_0 = 0
-        joint.v_1 = 0
-        joint.v_0_max = 0
-        joint.v_1_max = 0
-
-    joint.v_1 = max(min(joint.v_1, joint.v_1_max), joint.v_1_min)
-    joint.v_0 = max(min(joint.v_0, joint.v_0_max), joint.v_0_min)
 
 def update_boundary_velocities(prior: Params, current: Params, nxt: Params):
     """v_1_max may need to be specified if the next segment has a very short
     travel, or zero, because it may not be possible to decelerate during the phase.
     For instance, if next segment has x=0, then v_1 must be 0
-
-    Boundary velocity limits should only need to be recalculated when:
-        - A segment is newly added to the queue
-        - A segment gets a new next segment ( one is appended to the end)
     """
 
-    l = [prior, current, nxt]
-    m = save_for_change(l)
-
-    enforce_limits(current)
-
-    if prior is not None and nxt is None:
-        # This is the case for a newly added segment.
-
-        # Uncap the final velocity that was set to zero b/c it
-        # was the final segment.
-        prior.v_1_max = prior.v_max
-        prior.v_1 = prior.v_max
-
-    if prior:
-        enforce_limits(prior)
-        link_joints(prior, current)
-
-    else:
+    if prior is None:
+        # prior == None means that this is the first
+        # in the list
         current.v_0_max = current.v_0 = 0
-
-    if nxt:
-        enforce_limits(nxt)
-        link_joints(current, nxt)
-
     else:
-        current.v_1_max = current.v_1 = 0
+        if prior.x == 0 or not same_sign(prior.d, current.d):
+            current.v_0 = current.v_0_max = 0
+        else:
+            current.v_0_max = min(prior.v_1_max, current.v_0_max)
 
-    enforce_limits(current)
+        current.v_0 = min(prior.v_1, current.v_0_max)
 
-    return mark_saved_change(l, m)
+    if nxt is None:
+        # nxt == none means this is the last in the list
+        current.v_1 = 0
+    else:
+        if nxt.x == 0 or not same_sign(nxt.d, current.d):
+            current.v_1 = current.v_1_max = 0
+        else:
+            current.v_1_max = min(nxt.v_0_max, current.v_1_max)
 
+    current.v_1 = max(min(current.v_1, current.v_1_max), current.v_1_min)
+    current.v_0 = max(min(current.v_0, current.v_0_max), current.v_0_min)
+
+    if prior and  prior.v_1 != current.v_0:
+        return True # signal that v_0 changed so may need to update the prior
+    else:
+        return False
+
+def update_segment(joints: List[Params]) -> bool:
+
+    if all(e is None for e in joints):
+        return False
+
+    for j in joints:
+        min_time_parameters_p(j, inplace=True)
+
+    min_time = max([e.t for e in joints])
+
+    for p in joints:
+        update_params(p, min_time)
+        assert_consistent_area(p)
+
+def update_params(p, t):
+    """Update parameters to consider segment time, and set
+    values for the ACD phases and Vc"""
+
+    if p is None:
+        return None
+
+    if p.x == 0:
+        p.t_c = p.t = t
+        p.t_a = p.t_d = 0
+        p.t_a= p.t_d = p.v_c = 0
+        return p
+
+    p.t = t
+    p.v_c = hex_v_c(p.x, p.t, p.v_0, p.v_1, p.v_max, p.a_max)
+
+    p.x_a, p.t_a = accel_tx(p.v_0, p.v_c, p.a_max)
+    p.x_d, p.t_d = accel_tx(p.v_1, p.v_c, p.a_max)
+
+    if p.x_a + p.x_d > p.x:
+        # We're trying to increase the time for the segment, but v_0 and or
+        # v_1 are too large
+
+        # Going to need to move the velocities down. Just make them
+        # symmetric for now, but it would probably be better to
+        # move one down first.
+        p.v_0 = p.v_0_max = sqrt(2 * p.a_max * p.x/2)
+        p.v_1 = p.v_1_max = sqrt(2 * p.a_max * p.x/2)
+
+        p.v_c = hex_v_c(p.x, p.t, p.v_0, p.v_1, p.v_max, p.a_max)
+        p.x_a, p.t_a = accel_tx(p.v_0, p.v_c, p.a_max)
+        p.x_d, p.t_d = accel_tx(p.v_1, p.v_c, p.a_max)
+
+        p.flag = 'R' # Signal recalc
+    else:
+        p.flag = 'C'
+
+    p.t_c = p.t - p.t_a - p.t_d
+
+    assert p.t_c >= 0, (t, str( p))
+
+    p.x_c = p.v_c * p.t_c
+
+    x = p.x_a + p.x_c + p.x_d
+
+    assert round(x) == round(p.x), (x, t, str(p))
+
+    return p

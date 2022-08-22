@@ -368,7 +368,11 @@ class SegmentList(object):
 
         s = self.new_segment(joint_distances, prior_velocities)
 
+        uncap_end_segment([j.p for j in s.joint_segments])
+
         self.segments.append(s)
+
+        #self.update()
 
         return s
 
@@ -393,9 +397,19 @@ class SegmentList(object):
             if js1.v_1 != js2.v_0:
                 return True
 
-    def update(self, s=None):
+    def update(self,start = None):
 
-        pass
+        if start is None:
+            start = max(-len(self),-3)
+
+        for i in range(start, 0):
+            w = self.get_window(i)  # columns; each is a segment
+            pu = False
+            for p, c, n in zip(*w):
+                pu = pu or update_boundary_velocities(p, c, n)
+                assert not pu
+
+            update_segment(w[1])
 
 
     def _lim_segments(self, limit=4):
