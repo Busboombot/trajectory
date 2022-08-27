@@ -1,3 +1,6 @@
+from math import sqrt
+
+
 
 def hex_v_c_convex(x, t, v_0, v_1, v_max, a_max):
     """ Find the v_c for a pentagon, through decompositions

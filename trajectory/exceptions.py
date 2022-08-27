@@ -43,7 +43,7 @@ class ShortTimeError(TrapMathError):
         self.t = t
 
 
-class ParameterAdjustmentError(TrapMathError):
+class ParameterError(TrapMathError):
 
     def __init__(self, params, *args: object) -> None:
         super().__init__(*args)

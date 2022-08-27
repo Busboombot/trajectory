@@ -53,3 +53,81 @@ def plot_segment_list(df, ax=None):
 
     for axn in df.axis.unique():
         ax = plot_axis(df, axn, ax=ax)
+
+
+def plot_params_df(*args):
+    from .trapmath import  Params
+
+    import numpy as np
+
+    cols = ['t', 'seg', 'axis', 'x', 'v_i', 'v_f', 'ss', 'del_t', 'v0m', 'v1m', 'calc_x', 'err']
+
+    def p_to_s(p, seg, axis):
+        a = pd.Series( index=cols, dtype=np.float64)
+        c = pd.Series(index=cols, dtype=np.float64)
+        d = pd.Series(index=cols, dtype=np.float64)
+
+        a.seg = c.seg = d.seg = seg
+        a.axis = c.axis = d.axis = axis
+
+        a.x = p.x_a
+        c.x = p.x_c
+        d.x = p.x_d
+
+        a.ss = 'a'
+        c.ss = 'c'
+        d.ss = 'd'
+
+        a.del_t = p.t_a
+        c.del_t = p.t_c
+        d.del_t = p.t_d
+
+        a.v_i = p.v_0
+        a.v_f = p.v_c
+        c.v_i = p.v_c
+        c.v_f = p.v_c
+        d.v_i = p.v_c
+        d.v_f = p.v_1
+
+        yield a
+        yield c
+        yield d
+
+    seg_0 = []
+    segments = []
+
+    for i,a in enumerate(args):
+
+        if isinstance(a, Params):
+            # Individual Params
+            seg_0.append(a)
+        else: # Assume tuple of params -- a segment
+            segments.append(a)
+
+    if len(seg_0):
+        segments = [seg_0] + segments
+
+
+    rows = []
+    for i, seg in enumerate(segments):
+        for j, p in enumerate(seg):
+            rows.extend(p_to_s(p, i, j))
+
+    df = pd.DataFrame(rows)
+    df['seg'] = df.seg.astype(int)
+    df['axis'] = df.axis.astype(int)
+    df = df.fillna(0)
+
+
+    return df
+
+
+def plot_params(*args, ax=None):
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(20, 3))
+
+    df = plot_params_df(*args)
+    plot_segment_list(df, ax=ax)
+
+    return ax

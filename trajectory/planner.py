@@ -35,15 +35,13 @@ Joint segment shapes
 
 """
 from collections import deque
-from copy import deepcopy
-
-from typing import List
-from warnings import warn
 
 import pandas as pd
 
-from .exceptions import ValidationError, ShortSegment
+from .exceptions import ValidationError
 from .trapmath import *
+
+from dataclasses import dataclass
 
 ## Parameters for simulation/step generation
 
@@ -83,10 +81,10 @@ class SubSegment:
     ss: float
     v_0_max: float
     v_1_max: float
-    direction:int = 1
+    direction: int = 1
 
     def __post_init__(self):
-        assert self.v_i == 0 or self.v_f == 0 or sign(self.v_i) == sign(self.v_f),\
+        assert self.v_i == 0 or self.v_f == 0 or sign(self.v_i) == sign(self.v_f), \
             f"Inconsistent directions {self.v_i} {self.v_f} for {self.id}{self.ss} "
 
     def set_direction(self, sign) -> None:
@@ -113,8 +111,9 @@ class JointSegment(object):
 
     p: Params
 
-    params = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d', 'v_1',
-              'v_1_max']
+    _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
+                    'v_1',
+                    'v_1_max']
 
     def __init__(self, joint: Joint = None, x: float = None, v_0: float = 0, v_1: float = 0):
         """
@@ -189,6 +188,7 @@ class JointSegment(object):
 
         return f"[{v0_max}|{v0} {xa}%{ta} ↗ {c}@{vc}%{tc} ↘ {xd}%{td} {v1}|{v1_max}]"
 
+
 class Segment(object):
     """One segment, for all joints"""
 
@@ -212,24 +212,22 @@ class Segment(object):
         self.t = max(js.p.t_min for js in self.joint_segments)
 
     @classmethod
-    def update_prior(cls, prior, current):
+    def link(cls, prior: "Segment", current: "Segment"):
 
         prior.next_seg = current
         current.prior_seg = prior
 
-        for prior_js, curr_js in zip(current.prior_seg.joint_segments, current.joint_segments):
-            prior_js.next_js = curr_js
-            curr_js.prior_js = prior_js
-
-
-    def update(self):
-
-        for js in self.joint_segments:
-            update_params(js.p, self.t)
+        for p, c in zip(prior.joint_segments, current.joint_segments):
+            p.next_js = c
+            c.prior_js = p
 
     @property
     def final_velocities(self):
         return [j.p.v_1 for j in self.joint_segments]
+
+    @property
+    def params(self):
+        return [j.p for j in self.joint_segments]
 
     @property
     def err_t(self):
@@ -250,7 +248,6 @@ class Segment(object):
     def max_err_x(self):
         return max([js.err_x for js in self])
 
-
     @property
     def times(self):
         return [self.t] + [js.t for js in self.joint_segments]
@@ -259,20 +256,19 @@ class Segment(object):
     def min_t(self):
         return max([js.t for js in self.joint_segments])
 
-
     @property
-    def params(self):
+    def params_df(self):
 
         from operator import attrgetter
-        ag = attrgetter(*JointSegment.params)
+        ag = attrgetter(*JointSegment._param_names)
 
-        columns = ['seg', 'js', 'seg_t'] + JointSegment.params + ['calc_x', 'sum_x', 'calc_t']
+        columns = ['seg', 'js', 'seg_t'] + JointSegment._param_names + ['calc_x', 'sum_x', 'calc_t']
 
         rows = []
         for j, js in enumerate(self.joint_segments):
             r = (self.n, j, js.segment.t) + ag(js) + (js.calc_x, js.sum_x, js.calc_t)
             assert len(columns) == len(r)
-            d = dict(zip(columns, r) )
+            d = dict(zip(columns, r))
             rows.append(d)
 
         df = pd.DataFrame(rows)
@@ -292,14 +288,14 @@ class Segment(object):
         from operator import itemgetter
         keys = ['x', 'dir', 't',
                 'v_0_max', 'v_1_max', 'v_c_max',
-                'x_a', 't_a', 'x_d', 't_d',  'v_0', 'v_c', 'x_c', 't_c', 'v_1' ]
+                'x_a', 't_a', 'x_d', 't_d', 'v_0', 'v_c', 'x_c', 't_c', 'v_1']
 
         ag = itemgetter(*keys)
-        return [ dict( zip(keys,ag(js.__dict__))) for js in self]
+        return [dict(zip(keys, ag(js.__dict__))) for js in self]
 
     def load(self, d):
 
-        for js, e in zip(self.joint_segments,d):
+        for js, e in zip(self.joint_segments, d):
             for k, v in e.items():
                 setattr(js, k, v)
 
@@ -316,10 +312,11 @@ class Segment(object):
 
     def __str__(self):
 
-        return f"{self.t:>3.4f}|" + ' '.join(str(js) for js in self.joint_segments)+f" {round(self.max_err_x,2)}"
+        return f"{self.t:>3.4f}|" + ' '.join(str(js) for js in self.joint_segments) + f" {round(self.max_err_x, 2)}"
 
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
+
 
 class SegmentList(object):
     positions: List[float]  # Positions after last movement addition
@@ -328,7 +325,7 @@ class SegmentList(object):
 
     def __init__(self, joints: List[Joint]):
 
-        self.joints = [Joint(j.v_max, j.a_max, i) for i,j in enumerate(joints)]
+        self.joints = [Joint(j.v_max, j.a_max, i) for i, j in enumerate(joints)]
 
         self.directions = [0] * len(self.joints)
 
@@ -338,22 +335,14 @@ class SegmentList(object):
         self.segments = deque()
         self.positions = [0] * len(self.joints)
 
-    def new_segment(self, joint_distances, prior_velocities = None):
-
-        if prior_velocities is None:
-            prior_velocities = [0] * len(joint_distances)
-
-        assert len(joint_distances) == len(self.joints)
+    def new_segment(self, joint_distances, prior_velocities):
 
         js = [JointSegment(j, x=x, v_0=v_0) for j, x, v_0
-                        in zip(self.joints, joint_distances, prior_velocities)]
+              in zip(self.joints, joint_distances, prior_velocities)]
 
         prior = self.segments[-1] if len(self.segments) > 0 else None
 
         s = Segment(len(self.segments), js, prior)
-
-        if prior is not None:
-            Segment.update_prior(prior, s)
 
         return s
 
@@ -364,17 +353,74 @@ class SegmentList(object):
 
         assert len(joint_distances) == len(self.joints)
 
-        prior_velocities = self.segments[-1].final_velocities if len(self.segments) > 0 else None
+        if len(self.segments) > 0:
+            last = self.segments[-1]
+            uncap_end_segment(last.params)
+            prior_velocities = last.final_velocities
+        else:
+            prior_velocities = [0] * len(joint_distances)
 
         s = self.new_segment(joint_distances, prior_velocities)
 
-        uncap_end_segment([j.p for j in s.joint_segments])
+        if len(self.segments) > 0:
+            Segment.link(self.segments[-1], s)
 
         self.segments.append(s)
 
-        #self.update()
+        self.update_window(-1)
 
         return s
+
+    def _update_window(self, i):
+
+        w = self.get_window(i)  # columns; each is a segment
+
+        # prior_update is true when the prior segment should
+        # be updated
+        prior_update = any([update_boundary_velocities(p, c, n) for p, c, n in zip(*w)])
+        update_segment(w[1])
+
+        return prior_update
+
+    def update_window(self, i):
+        from trajectory.exceptions import ConvergenceError
+
+        for _ in range(4):
+            prior_update = self._update_window(i)
+
+            if prior_update:
+                i -= 1
+            else:
+                i += 1
+
+            if i == 0:
+                break
+
+        else:
+            raise ConvergenceError()
+
+    @property
+    def windows(self):
+        """Yield all windows of parameters"""
+        for i in range(len(self) - 1):
+            yield self.get_window(i)
+
+    @property
+    def segment_pairs(self):
+        """Yield all valid adjacent segment"""
+
+        for s in self.segments:
+            if s.next_seg is not None:
+                yield (s, s.next_seg)
+
+    @property
+    def joint_pairs(self):
+        """Yield all valid adjacent segment"""
+
+        for s in self.segments:
+            for j in s.joint_segments:
+                if j.next_js:
+                    yield (j, j.next_js)
 
     def get_window(self, i: int):
 
@@ -382,35 +428,12 @@ class SegmentList(object):
         current = []
         nxt = []
 
-        assert i < 0, 'Window index is from the end and must be negative'
-
         for js in self.segments[i]:
             prior.append(js.prior_js.p if js.prior_js else None)
             current.append(js.p)
             nxt.append(js.next_js.p if js.next_js else None)
 
         return prior, current, nxt
-
-    def has_discontinuity(self, s1, s2):
-
-        for js1, js2 in zip(s1, s2):
-            if js1.v_1 != js2.v_0:
-                return True
-
-    def update(self,start = None):
-
-        if start is None:
-            start = max(-len(self),-3)
-
-        for i in range(start, 0):
-            w = self.get_window(i)  # columns; each is a segment
-            pu = False
-            for p, c, n in zip(*w):
-                pu = pu or update_boundary_velocities(p, c, n)
-                assert not pu
-
-            update_segment(w[1])
-
 
     def _lim_segments(self, limit=4):
         if limit:
@@ -457,7 +480,7 @@ class SegmentList(object):
             warn(str(e))
 
         for ss in self.subsegments:
-            rows.append([None,  *ss.row])
+            rows.append([None, *ss.row])
 
         df = pd.DataFrame(rows, columns=' t seg axis x v_i v_f ss del_t v0m v1m'.split())
 
@@ -476,14 +499,27 @@ class SegmentList(object):
     def total_re(self):
         """Sum of the segment errors, from the dataframe, divided by total distance, of all axes"""
         t = self.dataframe
-        return t.err.abs().sum()/t.x.sum()
+        return t.err.abs().sum() / t.x.sum()
+
+    @property
+    def discontinuities(self):
+        """Yield segment pairs with velocity discontinuities"""
+        for c, n in self.joint_pairs:
+            if round(c.p.v_1, 2) != round(n.p.v_0, 2):
+                yield c, n
+
+    def has_discontinuity(self, s1, s2):
+
+        for js1, js2 in zip(s1, s2):
+            if js1.p.v_1 != js2.p.v_0:
+                return True
 
     @property
     def dataframe_stacked(self):
         return self.dataframe.set_index(['t', 'axis']).stack().unstack(-2).unstack(-1)
 
     @property
-    def params(self):
+    def params_df(self):
         """
         :return: a dataframe of paramaters
         :rtype:
@@ -491,12 +527,11 @@ class SegmentList(object):
 
         frames = []
         for i, s in enumerate(self.segments):
-            frames.append(s.params)
+            frames.append(s.params_df)
 
         df = pd.concat(frames)
 
         return df
-
 
     @property
     def subsegments(self):
