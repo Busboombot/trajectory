@@ -2,6 +2,113 @@
 from dataclasses import dataclass, asdict, replace
 from enum import Enum
 
+from .exceptions import *
+
+def accel_acd(v_0, v_c, v_1, a):
+    """ Same result as running accel_xt, for v_0->v_c and v_c->v_1,
+    and adding the x and t values.
+    """
+    t_ad = (abs(v_c - v_0) + abs(v_c - v_1)) / a
+    x_ad = abs((v_0 ** 2 - v_c ** 2) / (2 * a)) + abs((v_1 ** 2 - v_c ** 2) / (2 * a))
+
+    return x_ad, t_ad
+
+@dataclass
+class Joint:
+    v_max: float
+    a_max: float
+
+    def new_move(self, x, v_0=None, v_1=None):
+
+        v_0 = v_0 if v_0 is not None else self.v_max
+        v_1 = v_1 if v_1 is not None else self.v_max
+
+        return Move(x, v_0, v_1, self)
+
+    def new_block(self, x, v_0=None, v_1=None):
+        return self.new_move(x,v_0, v_1).new_block()
+
+@dataclass
+class Move:
+    x: float
+    v_0: float
+    v_1: float
+    joint: Joint
+
+    def new_block(self):
+        return Block(x=self.x, v_0=self.v_0, v_1=self.v_1,
+                     move=self, joint=self.joint)
+
+@dataclass
+class Block:
+    x: float = 0
+    t: float = 0
+    t_a: float = 0
+    t_c: float = 0
+    t_d: float = 0
+    x_a: float = 0
+    x_c: float = 0
+    x_d: float = 0
+    v_0: float = 0
+    v_c: float = 0
+    v_1: float = 0
+    v_0_max: float = None
+    v_0_min: float = 0
+    v_1_max: float = None
+    v_1_min: float = 0
+    t_min: float = 0
+    d: int = 0  # direction, -1 or 1
+    joint: Joint = None
+    move: Move = None
+    flag: str = None
+    recalcs: int = 0
+    jsclass: "JSClass" = None
+    saved = [None] * 4  # Initial save forces status as having changed.
+
+    def __post_init__(self):
+        from .trapmath import sign
+        self.d = sign(self.x)
+
+    def asdict(self):
+        return asdict(self)
+
+    def replace(self, **kwds):
+        return replace(self, **kwds)
+
+    @property
+    def subsegments(self):
+        rd = round  # lambda v, n: v
+        return (
+            (rd(self.t_a, 7), rd(self.v_0, 2), rd(self.v_c, 2), rd(self.x_a, 0), 'a'),
+            (rd(self.t_c, 7), rd(self.v_c, 2), rd(self.v_c, 2), rd(self.x_c, 0), 'c'),
+            (rd(self.t_d, 7), rd(self.v_c, 2), rd(self.v_1, 2), rd(self.x_d, 0), 'd')
+        )
+
+    @property
+    def area(self):
+        """Calculate the distance x as the area of the profile. Ought to
+        always match .x """
+
+        x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+        t_c = self.t - t_ad
+        x_c = self.v_c * t_c
+
+        if round(t_c, 4) < 0:
+            raise TrapMathError(f'Negative t_c' + str((t_c, t_ad,
+                    (self.t, self.v_0, self.v_c, self.v_1, self.joint.a_max))))
+
+        return x_ad + x_c
+
+
+    def plan(self, t=None):
+        from .profiles import plan_min_time
+
+        if t is None:
+            plan_min_time(self)
+        else:
+            assert False
+
+
 
 class JSClass(Enum):
     """
@@ -122,94 +229,4 @@ def classify(p):
 
     else:
         return JSClass.UNK
-
-
-
-@dataclass
-class InputParams:
-    x: float
-    v_0: float
-    v_1: float
-    v_max: float
-    a_max: float
-
-
-@dataclass
-class Params:
-    x: float
-    t: float = 0
-    t_a: float = 0
-    t_c: float = 0
-    t_d: float = 0
-    x_a: float = 0
-    x_c: float = 0
-    x_d: float = 0
-    v_0: float = 0
-    v_c: float = 0
-    v_1: float = 0
-    v_0_max: float = None
-    v_0_min: float = 0
-    v_1_max: float = None
-    v_1_min: float = 0
-    v_max: float = 0
-    a_max: float = 0
-    t_min: float = 0
-    d: int = 0  # direction, -1 or 1
-    ip: InputParams = None
-    flag: str = None
-    recalcs: int = 0
-    jsclass: JSClass = JSClass.UNK
-    saved = [None] * 4  # Initial save forces status as having changed.
-
-    def __post_init__(self):
-        from .trapmath import sign
-        self.d = sign(self.x)
-
-    def asdict(self):
-        return asdict(self)
-
-    def replace(self, **kwds):
-        return replace(self, **kwds)
-
-    @property
-    def subsegments(self):
-        rd = round  # lambda v, n: v
-        return (
-            (rd(self.t_a, 7), rd(self.v_0, 2), rd(self.v_c, 2), rd(self.x_a, 0), 'a'),
-            (rd(self.t_c, 7), rd(self.v_c, 2), rd(self.v_c, 2), rd(self.x_c, 0), 'c'),
-            (rd(self.t_d, 7), rd(self.v_c, 2), rd(self.v_1, 2), rd(self.x_d, 0), 'd')
-        )
-
-    def store(self):
-        self.saved = [round(self.t, 4), round(self.v_0), round(self.v_c), round(self.v_1)]
-
-    @property
-    def is_changed(self):
-
-        if self.saved is None:
-            return False
-
-        for p in zip(self.saved, [round(self.t, 4), round(self.v_0), round(self.v_c), round(self.v_1)]):
-
-            if p[0] != p[1]:
-                return True
-
-        return False
-
-    @property
-    def v_0_changed(self):
-
-        if self.saved is None:
-            return False
-
-        return self.saved[1] != self.v_0
-
-    @property
-    def changes(self):
-
-        if self.saved is None:
-            return [None] * len(self.saved)
-
-        return [p[0] != p[1]
-                for p in zip(self.saved, [round(self.t, 4), round(self.v_0), round(self.v_c), round(self.v_1)])]
 

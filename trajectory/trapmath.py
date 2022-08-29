@@ -1,8 +1,9 @@
 from math import sqrt
 from operator import attrgetter
 
-from trajectory.exceptions import TrapMathError
-from .params import Params
+from scipy.optimize import minimize_scalar
+
+from .params import Block
 
 X_LOWER_LIMIT = 10
 
@@ -39,203 +40,77 @@ def accel_xt(v_i, v_f, a):
     return x, t  # Area of velocity trapezoid
 
 
-def hex_area(t, v_0, v_c, v_1, a_max):
-
-    x_a, t_a = accel_xt(v_0, v_c, a_max)
-    x_d, t_d = accel_xt(v_c, v_1, a_max)
-
-    t_c = t - (t_a + t_d)
-
-    if round(t_c, 4) < 0:
-        raise TrapMathError(f'Negative t_c' + str((t_c, t_a + t_d, (t, v_0, v_c, v_1, a_max))))
-
-    x_c = v_c * t_c
-
-    return x_a + x_c + x_d
-
-
-def hex_area_p(p):
-    from operator import attrgetter
-    ag = attrgetter(*'t v_0 v_c v_1  a_max'.split())
-    return hex_area(*ag(p))
-
-
 def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
     # Compute an error for outside the boundaries, which has a slope back
     # to the valid range
 
     def f(v_c):
-        # x_ = hex_area(t, v_0, v_c, v_1, a_max)
+        from .params import accel_acd
 
-        x_a, t_a = accel_xt(v_0, v_c, a_max)
-        x_d, t_d = accel_xt(v_c, v_1, a_max)
+        x_ad, t_ad = accel_acd(v_0, v_c, v_1, a_max)
 
-        t_c = t - (t_a + t_d)
+        t_c = t - t_ad
+        x_c = v_c * t_c
 
-        # The abs is not correct for finding the area, but
-        # helps a lot in the minimization error function.
-        # x_c = abs(v_c * t_c)
+        if round(x_c) < 0:
+            return v_max
 
-        x_c = max(v_c * t_c, 0)
-
-        x_ = x_a + x_c + x_d
-
-        e = abs(x - x_)
-
-        if collar and (x_ < 0 or v_c < 0 or v_c > v_max or t_c < 0):
-            return e
-
-        else:
-            return e
+        return abs(x - ( x_c + x_ad ))
 
     return f
 
 
-def _calc_vc_min(x, v_0, v_1, v_max, a_max):
-    """Find a combination of v_c and boundary velocities that can solve the given profile.
-    the procedure is primarily looking for boundary values where the accel and decel
-    distances don't exceed the total distance
-
-    This one finds the minimum time profile
-    """
-    from scipy.optimize import minimize_scalar
-
-    recalcs = 0
-
-    if x == 0:
-        return *[0] * 7, 'Z'
-
-    # Reduce small entry and exit values
-
-    if x <= (v_max ** 2) / (2 * a_max):
-        # Drop the values immediately if they are small
-        dt = v_max / a_max
-        v_0 = min(x / dt, v_0)
-        v_1 = min(x / dt, v_1)
-
-    # boundary velocity limit. Below this limit, the reduction algorithm fails,
-    # so just drive the velocities to zero. The 480K value is empirical; I don't
-    # know what causes it.
-    elif x < (480_000 / a_max):
-        v_0 = 0
-        v_1 = 0
-
-    x_a, t_a = accel_xt(v_0, v_max, a_max)
-    x_d, t_d = accel_xt(v_max, v_1, a_max)
-
-    if x >= x_a + x_d:
-        # If there is more area than the triangular profile for these boundary
-        # velocities, the v_c must be v_max
-        return v_0, v_max, v_1, x_a, t_a, x_d, t_d, 'M'
-
-    # What's left are hex profiles in cases where 0 < v_c < v_max.
-    # These are triangular profiles, so x_c == 0 and x == (t_a+t_d)
-    def f(v_c):
-        x_a, t_a = accel_xt(v_0, v_c, a_max)
-        x_d, t_d = accel_xt(v_c, v_1, a_max)
-
-        return abs(x-(x_a + x_d))
-
-    # Quick scan of the spaceto set the inital bracket.
-    mv = min((f(v_c), v_c) for v_c in range(0, 5000, 50))[1]
-
-    r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
-
-    v_c = round(r.x)
-
-    x_a, t_a = accel_xt(v_0, v_c, a_max)
-    x_d, t_d = accel_xt(v_c, v_1, a_max)
-
-    return v_0, v_c, v_1, x_a, t_a, x_d, t_d, 'O'
-
-def calc_vc_min(x, v_0, v_1, v_max, a_max):
-    from .params import InputParams
-
-    v_0, v_c, v_1, x_a, t_a, x_d, t_d, r = _calc_vc_min(x, v_0, v_1, v_max, a_max)
-    x_c = x - (x_a + x_d)
-    assert x_c >= 0, (x_c, r)
-    t_c = x_c / v_c if v_c != 0 else 0
-    t = t_a + t_c + t_d
-
-    return Params(x, t=t,
-                  v_0=v_0, v_c=v_c, v_1=v_1,
-                  t_a=t_a, t_c=t_c, t_d=t_d,
-                  x_a=x_a, x_c=x_c, x_d=x_d,
-                  v_max=v_max, a_max=a_max,
-                  recalcs=r, ip=InputParams(x, v_0, v_1, v_max, a_max))
-
-
-def calc_v_c_t(x, t, v_0, v_1, v_max, a_max, recurse=0):
-    """ Calculate v_c for a profile. The results will be exact if v_0==v_1,
-    and a guess if v_0 != v_1"""
-
-    if recurse > 4:
-        from .exceptions import ConvergenceError
-        raise ConvergenceError(str((x, t, v_0, v_1, v_max, a_max)))
-
-    if x == 0 or t == 0:
-        return 0, 'Z'
-
-    if v_0 == 0 and v_1 == 0:
-        # should always be the lower root
-        v_c = a_max * t / 2 - sqrt(a_max * (a_max * t ** 2 - 4 * x)) / 2
-        return v_c, 'T'
-
-    v_h = max(v_0, v_1)
-
-    if x >= v_h * t:  # v_c must be above both v_0 and v_1, so it's a normal trap
-        if v_0 == v_1:
-            # subtract off v_0, v_1 and the corresponding x and run again.
-            x_ = v_0 * t
-            v_c = calc_v_c_t(x - x_, t, 0, 0, v_max, a_max, recurse=recurse + 1)[0]
-            v_c +=  v_0
-
-            return v_c, 'H'
-
-    if x < v_h * t and v_0 == v_1 and v_0 == v_max:
-        return v_h, 'L1'
-
-    if x < v_h * t and v_0 == v_1 and v_0 != v_max:
-        # This case might never happen
-        v_c = x / t
-        return v_c, 'L2'
-
-    # Last resort, take the mean of v_0 and v_1
-    v_m = (v_0 + v_1) / 2
-
-    v_c = calc_v_c_t(x, t, v_m, v_m, v_max, a_max, recurse=recurse + 1)[0]
-    v_c += v_0
-
-    return v_c, 'C'
-
-
-def hex_v_c(x, t, v_0, v_1, v_max, a_max):
+def hex_v_c(b):
     """Calculate the v_c parameter of a velocity hexagon, given all other
     parameters """
-    from scipy.optimize import minimize_scalar
 
-    args = (x, t, v_0, v_1, v_max, a_max)
+    ag = attrgetter(*'x t v_0 v_1'.split())
+    assert not any([e is None for e in ag(b)]), f'Something is null: {ag(b)}'
 
-    assert not any([e is None for e in args]), f'Something is null: {args}'
+    a_max = b.joint.a_max
+    v_h = max(b.v_0, b.v_1)
 
-    f = make_area_error_func(x, t, v_0, v_1, v_max, a_max)
+    ##
+    ## First try to calculate the values
+    ##
 
-    # Try to calculate the v_c, if if it is good, just return it.
-    # If it is close, use it for the bracket.
+    if b.x == 0 or b.t == 0:
+        return 0, 'Z'
 
-    vcg, qc = calc_v_c_t(x, t, v_0, v_1, v_max, a_max)
-    return vcg
+    elif b.v_0 == 0 and b.v_1 == 0:
+        # should always be the lower root
+        v_c = a_max * b.t / 2 - sqrt(a_max * (a_max * b.t ** 2 - 4 * b.x)) / 2
+        return v_c, 'T'
 
-    r = minimize_scalar(f, method='bounded', bounds=(0, v_max))
-    v_c = round(r.x)
+    elif b.x >= v_h * b.t and b.v_0 == b.v_1:
+        # subtract off v_0, v_1 and the corresponding x and run again.
+        x_ = b.v_0 * b.t
 
-    return v_c
+        # This is the same case as v_0 == v_1 == 0, but after subtracting off
+        # the area of the rectangular base, from v =0 to v=v_0. Then we add back in
+        # v_0.
+        v_c = b.v_0 + a_max * b.t / 2 - sqrt(a_max * (a_max * b.t ** 2 - 4 * (b.x - x_))) / 2
 
+        return v_c, 'H'
 
-def hex_v_c_p(p):
-    ag = attrgetter(*'x t v_0 v_1 v_max a_max'.split())
+    ## Well, that didn't work,
+    ## so let try minimization
 
-    return hex_v_c(*ag(p))
+    f = make_area_error_func(b.x, b.t, b.v_0, b.v_1, b.joint.v_max, b.joint.a_max)
+
+    mv = b.x/b.t # this usually performs just as well as the scan, and is cheaper.
+
+    try:
+        # The bounded method behaves badly some times, getting the wrong
+        # minimum. In thse cases, the area call will fail, and we run the
+        # other minimize call, which performs well in these cases.
+        r = minimize_scalar(f, method='bounded',
+                            bracket=(mv - 10, mv + 10), bounds=(0, b.joint.v_max))
+        b.replace(v_c=r.x).area
+    except:
+        r = minimize_scalar(f, bracket=(mv - 10, mv + 10) )
+
+    return r.x, 'O'
 
 
 def triangular_area(v_0, v_1, v_c, a_max):
@@ -276,7 +151,7 @@ def calc_boundary_values(x, v_0, v_1, v_max, a_max):
     return v_0, v_1, v_0_max, v_1_max
 
 
-def update_boundary_velocities(p: Params, c: Params, n: Params):
+def update_boundary_velocities(p: Block, c: Block, n: Block):
     """v_1_max may need to be specified if the next segment has a very short
     travel, or zero, because it may not be possible to decelerate during the phase.
     For instance, if next segment has x=0, then v_1 must be 0

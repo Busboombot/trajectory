@@ -4,152 +4,103 @@ from .exceptions import *
 from .params import *
 from .trapmath import accel_xt
 
-def reduce_v0_v1(p, recurse=None):
-    """Reduce v_1 and maybe v_0 to correct an error in x,
-    usually because the boundary velocities are too high for the x"""
+def limit_boundary_velocities(b):
 
-    if p.x_c >= 0:
-        return p  # Nothing to fix
+    v_max = b.joint.v_max
+    a_max = b.joint.a_max
 
-    dx = abs(p.x_c)
-    dv = 2 * dx / p.t  # corresponding change in velocities
+    if b.x < (480_000 / b.a_max):
+        # boundary velocity limit. Below this limit, the reduction algorithm fails,
+        # so just drive the velocities to zero. The 480K value is empirical; I don't
+        # know what causes it.
+        b.v_0 = 0
+        b.v_1 = 0
 
-    # boundary velocity limit. Below this limit, the reduction algorithm fails,
-    # so just drive the velocities to zero. The 480K value is empirical; I don't
-    # know what causes it.
-    if p.x < (480_000 / p.a_max) or (recurse is not None and recurse == 0):
-        v_0 = 0
-        v_1 = 0
-    elif (p.v_1 < 800 or dx < 20) and dv <= p.v_1:
-        # For small v_1, it isn' worth the multiple rounds of recursion
-        # since we'll probably drive it to zero anyway
-        v_1 = 0
-        v_0 = p.v_0
-    elif dv <= p.v_1:  # Just change v_1
-        v_1 = round(p.v_1 - dv)
-        v_0 = p.v_0
-    elif dv <= p.v_0 + p.v_1:  # change both v_0 and v_1
-        dv -= p.v_1
-        v_1 = 0
-        v_0 = round(p.v_0 - dv)
-    else:
-        assert False, 'Should not get here'
-        # Probably never get here?
-        v_0 = 0
-        v_1 = 0
-
-    return basic_profile(p.x, v_0, v_1, p.v_max, p.a_max, recurse=recurse)
+    elif b.x < (v_max ** 2) / (2 * a_max):
+        # Decel limit. Can't decelerate to zero in the required distance
+        dt = v_max / a_max
+        b.v_0 = min(b.x / dt, b.v_0)
+        b.v_1 = min(b.x / dt, b.v_1)
 
 
-def basic_profile(x, v_0, v_1, v_max, a_max, throw=False, recurse=None):
-    """Return a minimum time triangle, trapezoid, pentagon or hex profile """
 
-    if recurse is not None and recurse == 0:
-        raise ParameterError(None, 'Recursion depth exceeded')
-
-    if x < 0:
-        raise ParameterError(None, 'Distance must be positive')
-
-    # Time to get to v_c, which is presumed to be less than v_max
-
-    ####
-    #### THIS EQUATION IS PROBABLY WRONG! I think it is actually the total time for the segment.
-    #### not the interstion time, which are in hex_alt_area:
-    ## time of lower intersection of acceleration lines
-    # t_l = (a_max * t + v_0 - v_1) / (2 * a_max)
-    ## time of upper intersection
-    # t_u = (a_max * t - v_0 + v_1) / (2 * a_max)
-    t = (-v_0 - v_1 + sqrt(4 * a_max * x + 2 * v_0 ** 2 + 2 * v_1 ** 2)) / a_max
-    v_c = a_max * t / 2 + v_0 / 2 + v_1 / 2  # ... which is also the time we hit v_c
-
-    if v_c > v_max:
-        v_c = v_max
-
-    x_a, t_a = accel_xt(v_0, v_c, a_max)
-    x_d, t_d = accel_xt(v_c, v_1, -a_max)
-
-    x_c = x - x_a - x_d
-    x_c_r = round(x_c)
-
-    flag = 'BP'  # Normal return
-    if x_c_r > 0:
-        assert v_c == v_max, (x_c_r, v_c, v_max)
-        t_c = x_c / v_c
-    elif x_c_r == 0:
-        t_c = 0
-    else:  # less than 0, which is an error
-        t_c = 0
-        flag = 'E'  # Signal error.
-
-    p = Params(x, t=t_a + t_c + t_d, flag=flag,
-               v_0=v_0, v_c=v_c, v_1=v_1,
-               t_a=t_a, t_c=t_c, t_d=t_d,
-               x_a=x_a, x_c=x_c_r, x_d=x_d,
-               v_max=v_max, a_max=a_max)
-
-    if p.x_c < 0:
-        if throw:
-            raise ParameterError(p, f'x_c ({p.x_c}) is negative')
-        else:
-            # Try reducing v_0 and v_1
-            return reduce_v0_v1(p, recurse - 1 if recurse is not None else 3)
-    else:
-        return p
-
-MIN_SEGMENT_TIME = 0.1
-
-def min_profile(x, v_0, v_1, v_max, a_max):
+def plan_min_time(b: Block, inplace=True):
     """A minimum time profile for a given distance and boundary velocities."""
 
-    # Small movements are really difficult to process without errors, so
-    # lets try to push them down to be close to constant speed.
-    if x < (v_max ** 2) / (2 * a_max):
+    from scipy.optimize import minimize_scalar
+
+    a_max = b.joint.a_max
+    v_max = b.joint.v_max
+
+    if b.x == 0:
+        b.t = b.t_a = b.t_c = b.t_d = 0
+        b.x_a = b.x_c = b.x_d = 0
+        b.v_0 = b.v_1 = 0
+
+    elif b.x <= (v_max ** 2) / (2 * a_max):
+        # Small movements are really difficult to process without errors, so
+        # lets try to push them down to be close to constant speed
         dt = v_max / a_max
-        v_0 = min(x / dt, v_0)
-        v_1 = min(x / dt, v_1)
+        b.v_0 = min(b.x / dt, b.v_0)
+        b.v_1 = min(b.x / dt, b.v_1)
 
-    def find_v_c(x, v_0, v_1, v_max, a_max):
-        """Find a combination of v_c and boundary velocities that can solve the given profile.
-        the procedure is primarily looking for boundary values where the accel and decel
-        distances don't exceed the total distance """
+    elif b.x < (480_000 / a_max):
+        # boundary velocity limit. Below this limit, the reduction algorithm fails,
+        # so just drive the velocities to zero. The 480K value is empirical; I don't
+        # know what causes it.
+        b.v_0 = 0
+        b.v_1 = 0
+
+    x_a, t_a = accel_xt(b.v_0, v_max, a_max)
+    x_d, t_d = accel_xt(v_max, b.v_1, a_max)
+
+    if b.x == 0:
+        b.v_c = 0
+        flag = 'Z'
+    if b.x >= x_a + x_d:
+        # If there is more area than the triangular profile for these boundary
+        # velocities, the v_c must be v_max
         v_c = v_max
-        recalcs = 0
+        flag = 'M'
 
-        if x == 0:
-            return *[0]*7, recalcs
-
-        for i in range(8):
-            while v_c > v_max / 16:
-
-                x_a, t_a = accel_xt(v_0, v_c, a_max)
-                x_d, t_d = accel_xt(v_c, v_1, a_max)
-
-                if x >= x_a + x_d:
-                    return v_0, v_c, v_1, x_a, t_a, x_d, t_d, recalcs
-
-                v_c = v_c // 2
-                recalcs += 1
-
-            v_c = v_max
-            v_0 = v_0 // 2
-            v_1 = v_1 // 2
-
-        raise TrapMathError('Failed to find v_c ' + str((x, v_0, v_1, v_max, a_max)))
-
-    v_0, v_c, v_1, x_a, t_a, x_d, t_d, recalcs = find_v_c(x, v_0, v_1, v_max, a_max)
-
-    x_c = x - x_a - x_d
-    if v_c != 0:
-        t_c = x_c / v_c
     else:
-        t_c = 0
+        # What's left are hex profiles in cases where 0 < v_c < v_max.
+        # These are triangular profiles, so x_c == 0 and x == (t_a+t_d)
+        def f(v_c):
+            x_ad, t_ad = accel_acd(b.v_0, v_c, b.v_1, a_max)
+            return abs(b.x - x_ad)
 
-    return Params(x, t=t_a + t_c + t_d,
-                  v_0=v_0, v_c=v_c, v_1=v_1,
-                  t_a=t_a, t_c=t_c, t_d=t_d,
-                  x_a=x_a, x_c=x_c, x_d=x_d,
-                  v_max=v_max, a_max=a_max,
-                  recalcs=recalcs, ip=InputParams(x, v_0, v_1, v_max, a_max))
+        # Quick scan of the space to set the initial bracket.
+        mv = min((f(v_c), v_c) for v_c in range(0, 5000, 50))[1]
+
+        r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
+
+        v_c = round(r.x)
+
+        x_a, t_a = accel_xt(b.v_0, v_c, a_max)
+        x_d, t_d = accel_xt(v_c, b.v_1, a_max)
+        flag = 'O'
+
+    x_c = b.x - (x_a + x_d)
+
+    assert round(x_c) >= 0, (flag, b)
+
+    t_c = x_c / v_c if v_c != 0 else 0
+
+    if inplace:
+        b.t = t_a + t_c + t_d
+        b.v_c = v_c
+        b.x_a = x_a; b.x_c = x_c; b.x_d = x_d
+        b.t_a = t_a; b.t_c = t_c; b.t_d = t_d
+        b.flag = flag
+    else:
+        return b.replace(
+            t=t_a + t_c + t_d,
+            v_c=v_c,
+            x_a=x_a,  x_c=x_c, x_d=x_d,
+            t_a=t_a,  t_c=t_c, t_d=t_d,
+            flag=flag
+        )
 
 
 def halve_boundary_velocities(p):

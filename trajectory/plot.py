@@ -56,14 +56,14 @@ def plot_segment_list(df, ax=None):
 
 
 def plot_params_df(*args):
-    from .trapmath import  Params
+    from .trapmath import  Block
 
     import numpy as np
 
     cols = ['t', 'seg', 'axis', 'x', 'v_i', 'v_f', 'ss', 'del_t', 'v0m', 'v1m', 'calc_x', 'err']
 
     def p_to_s(p, seg, axis):
-        a = pd.Series( index=cols, dtype=np.float64)
+        a = pd.Series(index=cols, dtype=np.float64)
         c = pd.Series(index=cols, dtype=np.float64)
         d = pd.Series(index=cols, dtype=np.float64)
 
@@ -98,7 +98,7 @@ def plot_params_df(*args):
 
     for i,a in enumerate(args):
 
-        if isinstance(a, Params):
+        if isinstance(a, Block):
             # Individual Params
             seg_0.append(a)
         else: # Assume tuple of params -- a segment

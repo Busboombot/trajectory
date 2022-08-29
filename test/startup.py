@@ -19,6 +19,17 @@ import pandas as pd
 from math import sqrt
 from random import randint, random, choices
 
+pd.set_option('display.max_columns', None)
 
 a_max = 50_000
 v_max = 5_000
+
+from functools import cache
+
+@cache
+def limits():
+    """Return a list of (x,v_0, v_1) tuples for use in testing. """
+    distances =  [0] + list(range(50,2000, 25))
+    velocities = list(range(0,5000, 50))+[249,251, 4999, v_max]
+    
+    return list(enumerate(product(distances, velocities, velocities)))
