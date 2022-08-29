@@ -1,9 +1,5 @@
-
 from math import sqrt
 from operator import attrgetter
-from typing import List
-
-from scipy.optimize import minimize_scalar
 
 from trajectory.exceptions import TrapMathError
 from .params import Params
@@ -48,14 +44,15 @@ def hex_area(t, v_0, v_c, v_1, a_max):
     x_a, t_a = accel_xt(v_0, v_c, a_max)
     x_d, t_d = accel_xt(v_c, v_1, a_max)
 
-    t_c = t - (t_a + t_d )
+    t_c = t - (t_a + t_d)
 
-    if t_c < 0:
-        raise TrapMathError(f'Negative t_c'+str( ( t_c, (t, v_0, v_c, v_1, a_max))))
+    if round(t_c, 4) < 0:
+        raise TrapMathError(f'Negative t_c' + str((t_c, t_a + t_d, (t, v_0, v_c, v_1, a_max))))
 
     x_c = v_c * t_c
 
     return x_a + x_c + x_d
+
 
 def hex_area_p(p):
     from operator import attrgetter
@@ -68,7 +65,7 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
     # to the valid range
 
     def f(v_c):
-        #x_ = hex_area(t, v_0, v_c, v_1, a_max)
+        # x_ = hex_area(t, v_0, v_c, v_1, a_max)
 
         x_a, t_a = accel_xt(v_0, v_c, a_max)
         x_d, t_d = accel_xt(v_c, v_1, a_max)
@@ -79,7 +76,7 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
         # helps a lot in the minimization error function.
         # x_c = abs(v_c * t_c)
 
-        x_c = max(v_c * t_c,0)
+        x_c = max(v_c * t_c, 0)
 
         x_ = x_a + x_c + x_d
 
@@ -94,73 +91,128 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
     return f
 
 
-def calc_v_c(x, t, v_0, v_1, v_max, a_max, return_qc=False, recurse=0):
+def _calc_vc_min(x, v_0, v_1, v_max, a_max):
+    """Find a combination of v_c and boundary velocities that can solve the given profile.
+    the procedure is primarily looking for boundary values where the accel and decel
+    distances don't exceed the total distance
+
+    This one finds the minimum time profile
+    """
+    from scipy.optimize import minimize_scalar
+
+    recalcs = 0
+
+    if x == 0:
+        return *[0] * 7, 'Z'
+
+    # Reduce small entry and exit values
+
+    if x <= (v_max ** 2) / (2 * a_max):
+        # Drop the values immediately if they are small
+        dt = v_max / a_max
+        v_0 = min(x / dt, v_0)
+        v_1 = min(x / dt, v_1)
+
+    # boundary velocity limit. Below this limit, the reduction algorithm fails,
+    # so just drive the velocities to zero. The 480K value is empirical; I don't
+    # know what causes it.
+    elif x < (480_000 / a_max):
+        v_0 = 0
+        v_1 = 0
+
+    x_a, t_a = accel_xt(v_0, v_max, a_max)
+    x_d, t_d = accel_xt(v_max, v_1, a_max)
+
+    if x >= x_a + x_d:
+        # If there is more area than the triangular profile for these boundary
+        # velocities, the v_c must be v_max
+        return v_0, v_max, v_1, x_a, t_a, x_d, t_d, 'M'
+
+    # What's left are hex profiles in cases where 0 < v_c < v_max.
+    # These are triangular profiles, so x_c == 0 and x == (t_a+t_d)
+    def f(v_c):
+        x_a, t_a = accel_xt(v_0, v_c, a_max)
+        x_d, t_d = accel_xt(v_c, v_1, a_max)
+
+        return abs(x-(x_a + x_d))
+
+    # Quick scan of the spaceto set the inital bracket.
+    mv = min((f(v_c), v_c) for v_c in range(0, 5000, 50))[1]
+
+    r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
+
+    v_c = round(r.x)
+
+    x_a, t_a = accel_xt(v_0, v_c, a_max)
+    x_d, t_d = accel_xt(v_c, v_1, a_max)
+
+    return v_0, v_c, v_1, x_a, t_a, x_d, t_d, 'O'
+
+def calc_vc_min(x, v_0, v_1, v_max, a_max):
+    from .params import InputParams
+
+    v_0, v_c, v_1, x_a, t_a, x_d, t_d, r = _calc_vc_min(x, v_0, v_1, v_max, a_max)
+    x_c = x - (x_a + x_d)
+    assert x_c >= 0, (x_c, r)
+    t_c = x_c / v_c if v_c != 0 else 0
+    t = t_a + t_c + t_d
+
+    return Params(x, t=t,
+                  v_0=v_0, v_c=v_c, v_1=v_1,
+                  t_a=t_a, t_c=t_c, t_d=t_d,
+                  x_a=x_a, x_c=x_c, x_d=x_d,
+                  v_max=v_max, a_max=a_max,
+                  recalcs=r, ip=InputParams(x, v_0, v_1, v_max, a_max))
+
+
+def calc_v_c_t(x, t, v_0, v_1, v_max, a_max, recurse=0):
     """ Calculate v_c for a profile. The results will be exact if v_0==v_1,
     and a guess if v_0 != v_1"""
 
+    if recurse > 4:
+        from .exceptions import ConvergenceError
+        raise ConvergenceError(str((x, t, v_0, v_1, v_max, a_max)))
+
     if x == 0 or t == 0:
-        if return_qc:
-            return [0,0], 0  # 0 == exact
-        else:
-            return [0,0]
+        return 0, 'Z'
 
     if v_0 == 0 and v_1 == 0:
         # should always be the lower root
-        v_c = [a_max * t / 2 - sqrt(a_max * (a_max * t ** 2 - 4 * x)) / 2,
-               a_max * t / 2 + sqrt(a_max * (a_max * t ** 2 - 4 * x)) / 2]
-
-        v_c = [e for e in v_c if e <= v_max and e >= 0]
-
-        assert len(v_c) > 0, ('Got no quesses', x, t, v_0, v_1)
-
-        if return_qc:
-            return v_c,0 # 0 == exact
-        else:
-            return v_c
+        v_c = a_max * t / 2 - sqrt(a_max * (a_max * t ** 2 - 4 * x)) / 2
+        return v_c, 'T'
 
     v_h = max(v_0, v_1)
 
     if x >= v_h * t:  # v_c must be above both v_0 and v_1, so it's a normal trap
         if v_0 == v_1:
-            # substract off v_0, v_1 and the corresponding x and run again.
+            # subtract off v_0, v_1 and the corresponding x and run again.
             x_ = v_0 * t
-            v_c = calc_v_c(x - x_, t, 0, 0, v_max, a_max, recurse=recurse+1)
+            v_c = calc_v_c_t(x - x_, t, 0, 0, v_max, a_max, recurse=recurse + 1)[0]
+            v_c +=  v_0
 
-            v_c = [e+v_0 for e in v_c]
+            return v_c, 'H'
 
-            if return_qc:
-                return v_c, 0  # 0 == exact
-            else:
-                return v_c
+    if x < v_h * t and v_0 == v_1 and v_0 == v_max:
+        return v_h, 'L1'
 
-    if x < v_h*t and v_0 == v_1 and v_0 == v_max:
-
-        if return_qc:
-            return [v_h,v_h], -1  # 0 == exact
-        else:
-            return [v_h,v_h]
-
-        #assert False, ('Impossible distance for velocities', x, v_h, v_h*t)
-
+    if x < v_h * t and v_0 == v_1 and v_0 != v_max:
+        # This case might never happen
+        v_c = x / t
+        return v_c, 'L2'
 
     # Last resort, take the mean of v_0 and v_1
     v_m = (v_0 + v_1) / 2
-    if recurse > 4:
-        from .exceptions import ConvergenceError
-        raise ConvergenceError()
 
-    v_c = calc_v_c(x, t, v_m, v_m, v_max, a_max, recurse=recurse+1)
-    v_c = [e + v_0 for e in v_c]
+    v_c = calc_v_c_t(x, t, v_m, v_m, v_max, a_max, recurse=recurse + 1)[0]
+    v_c += v_0
 
-    if return_qc:
-        return v_c, -1
-    else:
-        return v_c
+    return v_c, 'C'
+
 
 def hex_v_c(x, t, v_0, v_1, v_max, a_max):
     """Calculate the v_c parameter of a velocity hexagon, given all other
     parameters """
-    from scipy.optimize import minimize_scalar, minimize, basinhopping
+    from scipy.optimize import minimize_scalar
 
     args = (x, t, v_0, v_1, v_max, a_max)
 
@@ -171,35 +223,11 @@ def hex_v_c(x, t, v_0, v_1, v_max, a_max):
     # Try to calculate the v_c, if if it is good, just return it.
     # If it is close, use it for the bracket.
 
-    ms_args = {'bounds': (0, v_max) }
-    guess = v_max / 2
-    try:
-        vcg, qc = calc_v_c(x, t, v_0, v_1, v_max, a_max, True)
+    vcg, qc = calc_v_c_t(x, t, v_0, v_1, v_max, a_max)
+    return vcg
 
-        vcg = [ min(e, v_max) for e in vcg]
-
-        if qc == 0:
-            return vcg[0]
-        else:
-            if len(vcg) == 2:
-                dv = (vcg[1] - vcg[0]) / 2
-            else:
-                dv = 200
-
-            ms_args = {'bracket': (vcg[0] - 5, vcg[0] + 5),
-                    'bounds': (vcg[0] - dv, vcg[0] + dv)}
-
-            guess = vcg[0]
-
-    except Exception as e:
-        print(type(e), e, (x, t, v_0, v_1, v_max, a_max))
-
-    r = minimize_scalar(f, method='bounded', bounds=(0,v_max))
-    #r = minimize_scalar(f)
+    r = minimize_scalar(f, method='bounded', bounds=(0, v_max))
     v_c = round(r.x)
-
-    #r = basinhopping(f, [guess])
-    #v_c = round(r.x[0])
 
     return v_c
 
@@ -210,84 +238,42 @@ def hex_v_c_p(p):
     return hex_v_c(*ag(p))
 
 
-def reduce_v0_v1(dx, t, v_0, v_1):
-    """Reduce v_1 and maybe v_0 to correct an error in x,
-    usually because the boundary velocities are too high for the x"""
+def triangular_area(v_0, v_1, v_c, a_max):
+    """Area of a triangular profile, which accelerates to v_c and
+    immediately decelerates"""
+    return (2 * a_max * (v_0 + v_1) + (v_0 - v_c) ** 2 + (v_1 - v_c) ** 2) / (2 * a_max)
 
-    dv = 2 * dx / t  # corresponding change in velocities
-
-    if dv <= v_1:  # Just change v_1
-        v_1 -= dv
-    elif dv < v_0 + v_1:  # change both v_0 and v_1
-        dv -= v_1
-        v_1 = 0
-        v_0 -= dv
-    else:
-        raise TrapMathError()
-
-    return v_0, v_1
 
 #####
 # Group operations
 #####
 
-def uncap_end_segment(s: List[Params]):
-    """Remove the v=0 requirement on the last segment"""
+def calc_boundary_values(x, v_0, v_1, v_max, a_max):
+    v_0_max = v_max
+    v_1_max = v_max
 
-    for j in s:
+    if x == 0:
+        # Zero length segments must be zero
+        v_0 = v_0_max = 0
+        v_1 = v_1_max = 0
+    elif x < (480_000 / a_max):
+        # boundary velocity limit. Below this limit, the reduction algorithm fails,
+        # so just drive the velocities to zero. The 480K value is empirical; I don't
+        # know what causes it, but it seems to apply for a variety of accelerations
+        # This value is usually < 10
+        v_0 = v_0_max = 0
+        v_1 = v_1_max = 0
+    elif x < (v_max ** 2) / (2 * a_max):
+        # This is the distance traveled in a full speed-acceleration from
+        # vmax to 0. This value is usually < 0
+        dt = v_max / a_max
+        v_0 = v_0_max = min(x / dt, v_0)
+        v_1 = v_1_max = min(x / dt, v_1)
+    else:
+        # Just return the input values.
+        pass
 
-        if j:
-            j.v_1_max = j.v_1 = j.v_max
-
-def segment_changed(s: List[Params]):
-    return any([j.is_changed if j is not None else None for j in s])
-
-
-def assert_equal_area(a: Params, b: Params):
-    """ Changing the area of a segment absolutely cannot be tolerated
-    :param a:
-    :type a:
-    :param b:
-    :type b:
-    :return:
-    :rtype:
-    """
-
-    if a is None or b is None:
-        return
-
-    assert_consistent_area(a)
-    assert_consistent_area(b)
-
-    assert round(a.x) == round(b.x), (a.x, b.x)  # Changing the area is a serious error
-
-    # no, really, it's bad
-    ax = hex_area_p(a)
-    bx = hex_area_p(b)
-    assert round(ax) == round(bx), (ax, bx)
-
-
-def assert_consistent_area(a: Params):
-    """Assert that the internal x is the same as the re-calculated area"""
-
-    if a is None:
-        return
-
-    ax = hex_area_p(a)
-    # <2 to allow a little tolerance in calculations
-    assert abs(a.x - ax) < 2, (a.x, ax)
-
-
-def save_for_change(l: List[Params]):
-    """Save joints for memoization, to discover changes"""
-    from copy import copy
-
-    return [copy(e) if e else None for e in l]
-
-
-def assert_unchanged_area(l: List[Params], memo: List[Params]):
-    for a, b in zip(l, memo):
-        assert_equal_area(a, b)
+    return v_0, v_1, v_0_max, v_1_max
 
 
 def update_boundary_velocities(p: Params, c: Params, n: Params):

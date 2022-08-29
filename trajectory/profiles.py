@@ -1,9 +1,8 @@
-from enum import Enum
-from .exceptions import *
 from math import sqrt
+
+from .exceptions import *
 from .params import *
 from .trapmath import accel_xt
-
 
 def reduce_v0_v1(p, recurse=None):
     """Reduce v_1 and maybe v_0 to correct an error in x,
@@ -13,20 +12,18 @@ def reduce_v0_v1(p, recurse=None):
         return p  # Nothing to fix
 
     dx = abs(p.x_c)
-
     dv = 2 * dx / p.t  # corresponding change in velocities
 
     # boundary velocity limit. Below this limit, the reduction algorithm fails,
     # so just drive the velocities to zero. The 480K value is empirical; I don't
     # know what causes it.
-
-    if p.x < (480_000/p.a_max) or (recurse is not None and recurse == 0):
+    if p.x < (480_000 / p.a_max) or (recurse is not None and recurse == 0):
         v_0 = 0
         v_1 = 0
     elif (p.v_1 < 800 or dx < 20) and dv <= p.v_1:
         # For small v_1, it isn' worth the multiple rounds of recursion
         # since we'll probably drive it to zero anyway
-        v_1 =0
+        v_1 = 0
         v_0 = p.v_0
     elif dv <= p.v_1:  # Just change v_1
         v_1 = round(p.v_1 - dv)
@@ -41,9 +38,8 @@ def reduce_v0_v1(p, recurse=None):
         v_0 = 0
         v_1 = 0
 
-    #print("ARGS", dx, (p.x, v_0, v_1, p.v_max, p.a_max) )
-
     return basic_profile(p.x, v_0, v_1, p.v_max, p.a_max, recurse=recurse)
+
 
 def basic_profile(x, v_0, v_1, v_max, a_max, throw=False, recurse=None):
     """Return a minimum time triangle, trapezoid, pentagon or hex profile """
@@ -60,9 +56,9 @@ def basic_profile(x, v_0, v_1, v_max, a_max, throw=False, recurse=None):
     #### THIS EQUATION IS PROBABLY WRONG! I think it is actually the total time for the segment.
     #### not the interstion time, which are in hex_alt_area:
     ## time of lower intersection of acceleration lines
-    #t_l = (a_max * t + v_0 - v_1) / (2 * a_max)
+    # t_l = (a_max * t + v_0 - v_1) / (2 * a_max)
     ## time of upper intersection
-    #t_u = (a_max * t - v_0 + v_1) / (2 * a_max)
+    # t_u = (a_max * t - v_0 + v_1) / (2 * a_max)
     t = (-v_0 - v_1 + sqrt(4 * a_max * x + 2 * v_0 ** 2 + 2 * v_1 ** 2)) / a_max
     v_c = a_max * t / 2 + v_0 / 2 + v_1 / 2  # ... which is also the time we hit v_c
 
@@ -75,31 +71,30 @@ def basic_profile(x, v_0, v_1, v_max, a_max, throw=False, recurse=None):
     x_c = x - x_a - x_d
     x_c_r = round(x_c)
 
-    flag = 'BP' # Normal return
+    flag = 'BP'  # Normal return
     if x_c_r > 0:
         assert v_c == v_max, (x_c_r, v_c, v_max)
-        t_c = x_c/v_c
+        t_c = x_c / v_c
     elif x_c_r == 0:
         t_c = 0
-    else: # less than 0, which is an error
+    else:  # less than 0, which is an error
         t_c = 0
-        flag = 'E' # Signal error.
+        flag = 'E'  # Signal error.
 
     p = Params(x, t=t_a + t_c + t_d, flag=flag,
-                  v_0=v_0, v_c=v_c, v_1=v_1,
-                  t_a=t_a, t_c=t_c, t_d=t_d,
-                  x_a=x_a, x_c=x_c_r, x_d=x_d,
-                  v_max=v_max, a_max=a_max)
+               v_0=v_0, v_c=v_c, v_1=v_1,
+               t_a=t_a, t_c=t_c, t_d=t_d,
+               x_a=x_a, x_c=x_c_r, x_d=x_d,
+               v_max=v_max, a_max=a_max)
 
     if p.x_c < 0:
         if throw:
             raise ParameterError(p, f'x_c ({p.x_c}) is negative')
         else:
             # Try reducing v_0 and v_1
-            return reduce_v0_v1(p, recurse-1 if recurse is not None else 3)
+            return reduce_v0_v1(p, recurse - 1 if recurse is not None else 3)
     else:
         return p
-
 
 MIN_SEGMENT_TIME = 0.1
 
@@ -108,17 +103,21 @@ def min_profile(x, v_0, v_1, v_max, a_max):
 
     # Small movements are really difficult to process without errors, so
     # lets try to push them down to be close to constant speed.
-    if x < (v_max**2)/(2*a_max):
+    if x < (v_max ** 2) / (2 * a_max):
         dt = v_max / a_max
-        v_0 = min(x/dt, v_0)
-        v_1 = min(x/dt, v_1)
-
-
+        v_0 = min(x / dt, v_0)
+        v_1 = min(x / dt, v_1)
 
     def find_v_c(x, v_0, v_1, v_max, a_max):
-        """Find a combination o v_c and boundary velocities that can solve the given profile"""
+        """Find a combination of v_c and boundary velocities that can solve the given profile.
+        the procedure is primarily looking for boundary values where the accel and decel
+        distances don't exceed the total distance """
         v_c = v_max
         recalcs = 0
+
+        if x == 0:
+            return *[0]*7, recalcs
+
         for i in range(8):
             while v_c > v_max / 16:
 
@@ -135,56 +134,61 @@ def min_profile(x, v_0, v_1, v_max, a_max):
             v_0 = v_0 // 2
             v_1 = v_1 // 2
 
-        raise TrapMathError('Failed to find v_c '+str((x, v_0, v_1, v_max, a_max)))
+        raise TrapMathError('Failed to find v_c ' + str((x, v_0, v_1, v_max, a_max)))
 
     v_0, v_c, v_1, x_a, t_a, x_d, t_d, recalcs = find_v_c(x, v_0, v_1, v_max, a_max)
 
     x_c = x - x_a - x_d
-    t_c = x_c / v_c
+    if v_c != 0:
+        t_c = x_c / v_c
+    else:
+        t_c = 0
 
     return Params(x, t=t_a + t_c + t_d,
                   v_0=v_0, v_c=v_c, v_1=v_1,
                   t_a=t_a, t_c=t_c, t_d=t_d,
                   x_a=x_a, x_c=x_c, x_d=x_d,
                   v_max=v_max, a_max=a_max,
-                  recalcs = recalcs, ip=InputParams(x, v_0, v_1, v_max, a_max))
+                  recalcs=recalcs, ip=InputParams(x, v_0, v_1, v_max, a_max))
 
 
-def update_params(p, t):
-    """Update parameter block with a new time"""
-    from .trapmath import hex_area_p, hex_v_c
+def halve_boundary_velocities(p):
+    """Reduce v_1 by halves, then v_0, finally set them to 0 """
 
-    assert round(t - p.t, 6) >= 0, (t, p.t) # Time must get larger
-
-    v_m = p.x / t  # mean time
-
-    v_c = hex_v_c(p.x, t, p.v_0, p.v_1, p.v_max, p.a_max)
-
-    x_a, t_a = accel_xt(p.v_0, v_c, p.a_max)
-    x_d, t_d = accel_xt(v_c, p.v_1, p.a_max)
-
-    x_c = p.x - (x_a + x_d)
-
-    if v_c == 0 or x_c == 0:
-        t_c = t - (t_a + t_d)
-        x_c = 0
+    if p.v_1 > p.v_max // 2 ** 6:
+        return p.replace(v_1=p.v_1 // 2)
+    elif p.v_0 > p.v_max // 2 ** 6:
+        return p.replace(v_0=p.v_0 // 2)
+    elif p.v_0 > 0 and p.v_1 > 0:
+        return p.replace(v_0=0, v_1=0)
     else:
-        t_c = x_c/v_c
+        raise TrapMathError()
 
-    x_ = x_a + x_c + x_d
-    t_ = t_a + t_c + t_d
+def update_params_accel(p, t, v_0=None):
+    """Update a block to a specific time, and into an accel
+    form, with no decel phase. """
 
-    x_ha = hex_area_p(p)
+    v_0 = p.v_max if v_0 is None else v_0
 
-    assert round(x_) == round(p.x), (p.x, x_, x_ha)
-    assert round(t - t_, 2) >= 0, (t, t_)
-    assert round(v_c) >= 0
+    a_max = p.a_max
 
-    p = p.replace(t=t_,
-                  x_a=x_a, x_c=x_c,x_d=x_d,
-                  t_a=t_a, t_c=t_c, t_d=t_d,
-                  v_c=v_c)
+    # no decel: v_1 == v_c
+    v_c = a_max * t + v_0 - sqrt(p.a_max * (p.a_max * t ** 2 + 2 * t * v_0 - 2 * p.x))
+    v_c = min(v_c, p.v_max)
+    x_a, t_a = accel_xt(v_0, v_c, p.a_max)
 
-    assert round(hex_area_p(p)) == round(p.x), (hex_area_p(p), p.x)
+    if x_a > p.x:
+        # It's just a simple trapezoid, no cruise
+        v_c = sqrt(2 * p.a_max * p.x + v_0 ** 2)
+        x_a, t_a = accel_xt(v_0, v_c, p.a_max)
+        assert round(x_a) >= round(p.x), (x_a, p.x)
 
+    x_c = p.x - x_a
+    t_c = x_c / v_c
+
+    p = p.replace(t=t_a + t_c, x=x_a + x_c,
+                  x_a=x_a, x_c=x_c, x_d=0,
+                  t_a=t_a, t_c=t_c, t_d=0,
+                  v_0=v_0, v_c=v_c, v_1=v_c)
     return p
+

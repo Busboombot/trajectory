@@ -5,9 +5,13 @@ from trajectory.params import *
 from trajectory.plot import *
 from trajectory import ParameterError
 from itertools import product 
+from more_itertools import chunked
 from operator import attrgetter
+from copy import copy
 import pandas as pd
 import numpy as np
+import pickle
+import seaborn as sns
 
 from IPython.display import display
 import pandas as pd
