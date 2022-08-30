@@ -116,6 +116,7 @@ def plot_params_df(*args):
     df = pd.DataFrame(rows)
     df['seg'] = df.seg.astype(int)
     df['axis'] = df.axis.astype(int)
+    df['t'] = df.groupby('axis').del_t.cumsum()
     df = df.fillna(0)
 
 

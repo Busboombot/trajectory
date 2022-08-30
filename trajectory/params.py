@@ -337,11 +337,17 @@ class Block:
                 self.init()
                 x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
                 self.recalcs += 1
-                self.plan(t_ad)
+                self.plan(max(self.t, t_ad))
                 self.flag = 'RV' # 1.5% of test cases
 
         assert self.v_c >= 0, (self.v_c, self.flag)
         assert round(self.area) == self.x
+
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+
+        self.x_c = self.x-(self.x_a+self.x_d)
+        self.t_c = self.t-(self.t_a + self.t_d)
 
         return self
 
