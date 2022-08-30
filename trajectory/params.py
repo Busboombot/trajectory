@@ -42,6 +42,19 @@ def sign(x):
         return -1
 
 
+def halve_boundary_velocities(p):
+    """Reduce v_1 by halves, then v_0, finally set them to 0 """
+
+    if  p.v_1 > 1:  # Allow 6 divisions
+        p.v_1 = p.v_1/2
+    elif p.v_0 > 1:
+        p.v_0 = p.v_0/2
+    elif p.v_0 > 0 and p.v_1 > 0:
+        p.v_0 = 0
+        p.v_1 = 0
+    else:
+        raise TrapMathError("Can't reduce velocities any more")
+
 
 
 def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
@@ -50,6 +63,9 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
 
     def f(v_c):
         from .params import accel_acd
+
+        if v_c < 0:
+            return v_max
 
         x_ad, t_ad = accel_acd(v_0, v_c, v_1, a_max)
 
@@ -64,6 +80,25 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
     return f
 
 
+def calc_area(t, v_0, v_c, v_1, v_max, a_max):
+    """ Calculate
+
+    t_a = (v_c - v_0) / a
+    t_d = (v_1 - v_c) / -a
+    x_a = ((v_0 + v_c) / 2) * t_a
+    x_d = ((v_c + v_1) / 2) * t_d
+
+    t_c = t - (t_a + t_d)
+    x_c = t_c/v_c
+
+    x_pent = simplify(x_a+x_c+x_d)
+
+    """
+
+    # return (a_max*t - v_0**2*v_c/2 + v_0 - v_1**2*v_c/2 + v_1 + v_c**3 - 2*v_c)/(a_max*v_c)
+
+    # or: x_pent = simplify(x_a+x_d), since this equation doesn't seem to do anything with x_c
+    return (-v_0 ** 2 - v_1 ** 2 + 2 * v_c ** 2) / (2 * a_max)
 
 
 @dataclass
@@ -129,6 +164,7 @@ class Block:
         always match .x """
 
         x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+
         t_c = self.t - t_ad
         x_c = self.v_c * t_c
 
@@ -178,7 +214,7 @@ class Block:
             v_c = v_max
             flag = 'M'
 
-        elif  self.x < (v_max ** 2) / (a_max):
+        elif self.x < (v_max ** 2) / (a_max):
             # The round() is important here. Without it, we get math domain errors
             # elsewhere.
             # t_a = (v_c - v_0) / a
@@ -188,11 +224,12 @@ class Block:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
-            v_c = round(sqrt(4*a_max*self.x + 2*self.v_0**2 + 2*self.v_1**2)/2)
+            v_c = round(sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
             flag = 'S'
 
         else:
             assert False, "This code should not execute"
+
             # What's left are hex profiles in cases where 0 < v_c < v_max.
             # These are triangular profiles, so x_c == 0 and x == (t_a+t_d)
             def f(v_c):
@@ -244,13 +281,13 @@ class Block:
 
         if self.x == 0 or self.t == 0:
             self.v_c = 0
-            self.flag = 'Z'
+            self.flag = 'Z' # 5% of test cases
 
         elif self.v_0 == 0 and self.v_1 == 0:
             # should always be the lower root
             # Compare to equation 3.6 of Biagiotti
             self.v_c = a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * self.x)) / 2
-            self.flag = 'T'
+            self.flag = 'T' # .16% of test cases
 
         elif self.x >= v_h * self.t and self.v_0 == self.v_1:
             # subtract off v_0, v_1 and the corresponding x and run again.
@@ -260,7 +297,7 @@ class Block:
             # the area of the rectangular base, from v =0 to v=v_0. Then we add back in
             # v_0.
             self.v_c = self.v_0 + a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * (self.x - x_))) / 2
-            self.flag = 'H'
+            self.flag = 'T0' # about 12%% of cases
         else:
             ## Well, that didn't work,
             ## so let try minimization
@@ -275,14 +312,38 @@ class Block:
                 # other minimize call, which performs well in these cases.
                 r = minimize_scalar(f, method='bounded',
                                     bracket=(mv - 10, mv + 10), bounds=(0, self.joint.v_max))
+
                 a = self.replace(v_c=r.x).area  # Just to throw an exception
                 if round(a) != self.x:
                     raise TrapMathError()
+                self.flag = 'O1' # 78% of test cases
             except:
                 r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
+                self.flag = 'O2' # About 1.5% of cases, or less
 
             self.v_c = r.x
-            self.flag = 'O'
+
+            # Mop up errors. These cases occur because moving v_c also
+            # increases the time for the block, so to we have to adjust the time;
+            # this makes the blocks longer than they were commanded to be, and that
+            # will require another update later.
+            x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+            if t_ad > self.t:
+                self.recalcs += 1
+                self.plan(t_ad)
+                self.flag = 'RT' # .4% of test cases
+            if round(self.area) != self.x:
+                halve_boundary_velocities(self)
+                self.init()
+                x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+                self.recalcs += 1
+                self.plan(t_ad)
+                self.flag = 'RV' # 1.5% of test cases
+
+        assert self.v_c >= 0, (self.v_c, self.flag)
+        assert round(self.area) == self.x
+
+        return self
 
 class JSClass(Enum):
     """

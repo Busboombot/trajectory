@@ -29,7 +29,7 @@ from functools import cache
 @cache
 def limits():
     """Return a list of (x,v_0, v_1) tuples for use in testing. """
-    distances =  [0] + list(range(50,2000, 25))
-    velocities = list(range(0,5000, 50))+[249,251, 4999, v_max]
+    distances =  [0,10,20,40,45, 50, 100, 200, 249,250,251, 300,400, 450, 499,500,501, 1000, 2000, 5000] 
+    velocities = [0,1,50]+ list(range(250,v_max, 250))+[v_max-1, v_max]
     
     return list(enumerate(product(distances, velocities, velocities)))

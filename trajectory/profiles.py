@@ -29,17 +29,6 @@ def limit_boundary_velocities(b):
         b.v_1 = min(b.x / dt, b.v_1)
 
 
-def halve_boundary_velocities(p):
-    """Reduce v_1 by halves, then v_0, finally set them to 0 """
-
-    if p.v_1 > p.v_max // 2 ** 6:
-        return p.replace(v_1=p.v_1 // 2)
-    elif p.v_0 > p.v_max // 2 ** 6:
-        return p.replace(v_0=p.v_0 // 2)
-    elif p.v_0 > 0 and p.v_1 > 0:
-        return p.replace(v_0=0, v_1=0)
-    else:
-        raise TrapMathError()
 
 
 def update_params_accel(p, t, v_0=None):
