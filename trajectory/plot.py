@@ -56,7 +56,7 @@ def plot_segment_list(df, ax=None):
 
 
 def plot_params_df(*args):
-    from .trapmath import  Block
+    from .params import  Block
 
     import numpy as np
 

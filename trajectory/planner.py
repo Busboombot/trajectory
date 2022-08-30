@@ -38,6 +38,7 @@ from collections import deque
 
 import pandas as pd
 
+from . import update_boundary_velocities
 from .exceptions import ValidationError
 from .trapmath import *
 

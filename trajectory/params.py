@@ -1,8 +1,27 @@
-
 from dataclasses import dataclass, asdict, replace
 from enum import Enum
+from math import sqrt
+from operator import attrgetter
+
+from scipy.optimize import minimize_scalar
 
 from .exceptions import *
+
+
+def accel_xt(v_i, v_f, a):
+    """Distance and time required to accelerate from v0 to v1 at acceleration a"""
+
+    if v_f == v_i:
+        return 0, 0
+
+    if v_f < v_i:
+        a = -a
+
+    t = (v_f - v_i) / a  # Time to change from v0 to v1 at max acceleration
+    x = (v_i + v_f) / 2 * t
+
+    return x, t  # Area of velocity trapezoid
+
 
 def accel_acd(v_0, v_c, v_1, a):
     """ Same result as running accel_xt, for v_0->v_c and v_c->v_1,
@@ -13,31 +32,50 @@ def accel_acd(v_0, v_c, v_1, a):
 
     return x_ad, t_ad
 
+
+def sign(x):
+    if x == 0:
+        return 0
+    elif x > 0:
+        return 1
+    else:
+        return -1
+
+
+
+
+def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
+    # Compute an error for outside the boundaries, which has a slope back
+    # to the valid range
+
+    def f(v_c):
+        from .params import accel_acd
+
+        x_ad, t_ad = accel_acd(v_0, v_c, v_1, a_max)
+
+        t_c = t - t_ad
+        x_c = v_c * t_c
+
+        if round(x_c) < 0:
+            return v_max
+
+        return abs(x - (x_c + x_ad))
+
+    return f
+
+
+
+
 @dataclass
 class Joint:
     v_max: float
     a_max: float
 
-    def new_move(self, x, v_0=None, v_1=None):
-
+    def new_block(self, x, v_0=None, v_1=None):
         v_0 = v_0 if v_0 is not None else self.v_max
         v_1 = v_1 if v_1 is not None else self.v_max
+        return Block(x=x, v_0=v_0, v_1=v_1, joint=self)
 
-        return Move(x, v_0, v_1, self)
-
-    def new_block(self, x, v_0=None, v_1=None):
-        return self.new_move(x,v_0, v_1).new_block()
-
-@dataclass
-class Move:
-    x: float
-    v_0: float
-    v_1: float
-    joint: Joint
-
-    def new_block(self):
-        return Block(x=self.x, v_0=self.v_0, v_1=self.v_1,
-                     move=self, joint=self.joint)
 
 @dataclass
 class Block:
@@ -59,14 +97,15 @@ class Block:
     t_min: float = 0
     d: int = 0  # direction, -1 or 1
     joint: Joint = None
-    move: Move = None
     flag: str = None
     recalcs: int = 0
     jsclass: "JSClass" = None
-    saved = [None] * 4  # Initial save forces status as having changed.
+
+    segment = None
+    next: "Block" = None
+    prior: "Block" = None
 
     def __post_init__(self):
-        from .trapmath import sign
         self.d = sign(self.x)
 
     def asdict(self):
@@ -93,22 +132,157 @@ class Block:
         t_c = self.t - t_ad
         x_c = self.v_c * t_c
 
-        if round(t_c, 4) < 0:
-            raise TrapMathError(f'Negative t_c' + str((t_c, t_ad,
-                    (self.t, self.v_0, self.v_c, self.v_1, self.joint.a_max))))
+        if round(x_c) < 0:
+            raise TrapMathError(f'Negative x_c' + str((x_c, x_ad,
+                                                       (self.x, self.v_0, self.v_c, self.v_1, self.joint.a_max))))
 
         return x_ad + x_c
 
+    def init(self):
 
-    def plan(self, t=None):
-        from .profiles import plan_min_time
+        a_max = self.joint.a_max
+        v_max = self.joint.v_max
 
-        if t is None:
-            plan_min_time(self)
+        if self.x == 0:
+            self.t = self.t_a = self.t_c = self.t_d = 0
+            self.x_a = self.x_c = self.x_d = 0
+            self.v_0 = self.v_1 = 0
+
+        elif self.x < (480_000 / a_max):
+            # boundary velocity limit. Below this limit, the reduction algorithm fails,
+            # so just drive the velocities to zero. The 480K value is empirical; I don't
+            # know what causes it.
+            self.v_0 = 0
+            self.v_1 = 0
+
+        elif self.x <= (v_max ** 2) / (2 * a_max):
+            # Small movements are really difficult to process without errors, so
+            # lets try to push them down to be close to constant speed
+            dt = v_max / a_max
+            self.v_0 = min(self.x / dt, self.v_0)
+            self.v_1 = min(self.x / dt, self.v_1)
+
+        x_a, t_a = accel_xt(self.v_0, v_max, a_max)
+        x_d, t_d = accel_xt(v_max, self.v_1, a_max)
+
+        if self.x == 0:
+            v_c = 0
+            flag = 'Z'
+            x_a = x_d = t_a = t_c = t_d = 0
+
+        elif self.x >= x_a + x_d:
+            # If there is more area than the triangular profile for these boundary
+            # velocities, the v_c must be v_max
+            # This is the complimentary case to the next one; if one is true the
+            # other is not, so one could be an else, and the 'O' case never runs.
+            v_c = v_max
+            flag = 'M'
+
+        elif  self.x < (v_max ** 2) / (a_max):
+            # The round() is important here. Without it, we get math domain errors
+            # elsewhere.
+            # t_a = (v_c - v_0) / a
+            # t_d = (v_1 - v_c) / -a
+            # x_a = ((v_0 + v_c) / 2) * t_a
+            # x_d = ((v_c + v_1) / 2) * t_d
+            # x_c = x - (x_a + x_d)
+            # solve(x_c, v_c)[1]
+
+            v_c = round(sqrt(4*a_max*self.x + 2*self.v_0**2 + 2*self.v_1**2)/2)
+            flag = 'S'
+
         else:
-            assert False
+            assert False, "This code should not execute"
+            # What's left are hex profiles in cases where 0 < v_c < v_max.
+            # These are triangular profiles, so x_c == 0 and x == (t_a+t_d)
+            def f(v_c):
+                x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, a_max)
+                return abs(self.x - x_ad)
 
+            # Quick scan of the space to set the initial bracket.
+            mv = min((f(v_c), v_c) for v_c in range(0, 5000, 50))[1]
 
+            r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
+
+            v_c = round(r.x)
+
+            flag = 'O'
+
+        x_a, t_a = accel_xt(self.v_0, v_c, a_max)
+        x_d, t_d = accel_xt(v_c, self.v_1, a_max)
+
+        x_c = self.x - (x_a + x_d)
+        t_c = x_c / v_c if v_c != 0 else 0
+
+        assert round(x_c) >= 0, (x_c, v_c, flag, self)
+
+        self.t = t_a + t_c + t_d
+        self.v_c = v_c
+        self.x_a = x_a
+        self.x_c = x_c
+        self.x_d = x_d
+        self.t_a = t_a
+        self.t_c = t_c
+        self.t_d = t_d
+        self.flag = flag
+
+        return self
+
+    def plan(self, t):
+
+        ag = attrgetter(*'x t v_0 v_1'.split())
+        assert not any([e is None for e in ag(self)]), f'Something is null: {ag(b)}'
+
+        self.t = t
+
+        a_max = self.joint.a_max
+        v_h = max(self.v_0, self.v_1)
+
+        ##
+        ## First try to calculate the values
+        ##
+
+        if self.x == 0 or self.t == 0:
+            self.v_c = 0
+            self.flag = 'Z'
+
+        elif self.v_0 == 0 and self.v_1 == 0:
+            # should always be the lower root
+            # Compare to equation 3.6 of Biagiotti
+            self.v_c = a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * self.x)) / 2
+            self.flag = 'T'
+
+        elif self.x >= v_h * self.t and self.v_0 == self.v_1:
+            # subtract off v_0, v_1 and the corresponding x and run again.
+            x_ = self.v_0 * self.t
+
+            # This is the same case as v_0 == v_1 == 0, but after subtracting off
+            # the area of the rectangular base, from v =0 to v=v_0. Then we add back in
+            # v_0.
+            self.v_c = self.v_0 + a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * (self.x - x_))) / 2
+            self.flag = 'H'
+        else:
+            ## Well, that didn't work,
+            ## so let try minimization
+
+            f = make_area_error_func(self.x, self.t, self.v_0, self.v_1, self.joint.v_max, self.joint.a_max)
+
+            mv = self.x / self.t  # this usually performs just as well as the scan, and is cheaper.
+
+            try:
+                # The bounded method behaves badly some times, getting the wrong
+                # minimum. In thse cases, the area call will fail, and we run the
+                # other minimize call, which performs well in these cases.
+                r = minimize_scalar(f, method='bounded',
+                                    bracket=(mv - 10, mv + 10), bounds=(0, self.joint.v_max))
+                a = self.replace(v_c=r.x).area  # Just to throw an exception
+                if round(a) != self.x:
+                    raise TrapMathError()
+            except:
+                r = minimize_scalar(f, bracket=(mv - 10, mv + 10))
+
+            self.v_c = r.x
+            self.flag = 'O'
 
 class JSClass(Enum):
     """
@@ -229,4 +403,3 @@ def classify(p):
 
     else:
         return JSClass.UNK
-
