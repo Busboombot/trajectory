@@ -38,10 +38,9 @@ from collections import deque
 
 import pandas as pd
 
-from . import update_boundary_velocities
 from .exceptions import ValidationError
-from .trapmath import *
-
+from.params import *
+from typing import List
 from dataclasses import dataclass
 
 ## Parameters for simulation/step generation
@@ -64,6 +63,12 @@ class Joint:
     v_max: float
     a_max: float
     n: int = None
+
+    def new_block(self, x, v_0=None, v_1=None):
+        v_0 = v_0 if v_0 is not None else self.v_max
+        v_1 = v_1 if v_1 is not None else self.v_max
+        return Block(x=x, v_0=v_0, v_1=v_1, joint=self).init()
+
 
 
 @dataclass
@@ -110,7 +115,7 @@ class JointSegment(object):
     next_js: 'JointSegment'
     prior_js: 'JointSegment'
 
-    p: Params
+    b: Block
 
     _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
                     'v_1',
@@ -133,7 +138,7 @@ class JointSegment(object):
         self.next_js = None
         self.prior_js = None
 
-        self.p = min_time_parameters(x, v_0, v_1, self.joint.v_max, self.joint.a_max)
+        self.b = self.joint.new_block(x, v_0, v_1)
 
     @property
     def id(self):
@@ -142,25 +147,25 @@ class JointSegment(object):
     @property
     def err_x(self):
         """Return true of the subsegment error is larger than 3% of the x"""
-        if self.p.x != 0:
+        if self.b.x != 0:
             return 0
         else:
             return 0
 
     @property
     def subsegments(self):
-        return [SubSegment(self.id, self.segment.n, self.joint, self, *ss, self.p.v_0_max, self.p.v_1_max)
-                for ss in self.p.subsegments]
+        return [SubSegment(self.id, self.segment.n, self.joint, self, *ss, self.b.v_0_max, self.b.v_1_max)
+                for ss in self.b.subsegments]
 
     def __str__(self):
         from colors import color, bold
 
-        v0 = color(f"{int(self.p.v_0):<5d}", fg='green')
-        xa = bold(f"{int(self.p.d * self.p.x_a):>6d}")
-        c = bold(f"{int(round(self.p.d * self.p.x_c)):>6d}")
-        vc = color(f"{int(self.p.v_c):<6d}", fg='blue')
-        xd = bold(f"{int(self.p.d * self.p.x_d):<6d}")
-        v1 = color(f"{int(self.p.v_1):>5d}", fg='red')
+        v0 = color(f"{int(self.b.v_0):<5d}", fg='green')
+        xa = bold(f"{int(self.b.d * self.b.x_a):>6d}")
+        c = bold(f"{int(round(self.b.d * self.b.x_c)):>6d}")
+        vc = color(f"{int(self.b.v_c):<6d}", fg='blue')
+        xd = bold(f"{int(self.b.d * self.b.x_d):<6d}")
+        v1 = color(f"{int(self.b.v_1):>5d}", fg='red')
 
         return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
 
@@ -175,20 +180,19 @@ class JointSegment(object):
 
         from colors import color, bold
 
-        v0_max = color(f"{int(self.p.v_0_max):<5d}", fg='green')
-        v0 = color(f"{int(self.p.v_0):<5d}", fg='green')
-        xa = bold(f"{int(self.p.d * self.p.x_a):>6d}")
-        ta = bold(f"{int(self.p.d * self.p.t_a):<1.5f}")
-        c = bold(f"{int(round(self.p.d * self.p.x_c))}")
-        vc = color(f"{int(self.p.v_c)}", fg='blue')
-        tc = bold(f"{int(self.p.d * self.p.t_c):<1.5f}")
-        xd = bold(f"{int(self.p.d * self.p.x_d):>6d}")
-        td = bold(f"{int(self.p.d * self.p.t_d):<1.5f}")
-        v1 = color(f"{int(self.p.v_1):>5d}", fg='red')
-        v1_max = color(f"{int(self.p.v_1_max):>5d}", fg='red')
+        v0_max = color(f"{int(self.b.v_0_max):<5d}", fg='green')
+        v0 = color(f"{int(self.b.v_0):<5d}", fg='green')
+        xa = bold(f"{int(self.b.d * self.b.x_a):>6d}")
+        ta = bold(f"{int(self.b.d * self.b.t_a):<1.5f}")
+        c = bold(f"{int(round(self.b.d * self.b.x_c))}")
+        vc = color(f"{int(self.b.v_c)}", fg='blue')
+        tc = bold(f"{int(self.b.d * self.b.t_c):<1.5f}")
+        xd = bold(f"{int(self.b.d * self.b.x_d):>6d}")
+        td = bold(f"{int(self.b.d * self.b.t_d):<1.5f}")
+        v1 = color(f"{int(self.b.v_1):>5d}", fg='red')
+        v1_max = color(f"{int(self.b.v_1_max):>5d}", fg='red')
 
         return f"[{v0_max}|{v0} {xa}%{ta} ↗ {c}@{vc}%{tc} ↘ {xd}%{td} {v1}|{v1_max}]"
-
 
 class Segment(object):
     """One segment, for all joints"""
@@ -196,6 +200,7 @@ class Segment(object):
     n: int = None
     next_seg: "Segment" = None
     prior_seg: "Segment" = None
+    joint_segments: "JointSegment" = None
     t: float = 0
 
     n_updates: int = 0
@@ -210,7 +215,7 @@ class Segment(object):
         for js in self.joint_segments:
             js.segment = self
 
-        self.t = max(js.p.t_min for js in self.joint_segments)
+        self.t = max(js.b.t_min for js in self.joint_segments)
 
     @classmethod
     def link(cls, prior: "Segment", current: "Segment"):
@@ -224,11 +229,11 @@ class Segment(object):
 
     @property
     def final_velocities(self):
-        return [j.p.v_1 for j in self.joint_segments]
+        return [j.b.v_1 for j in self.joint_segments]
 
     @property
     def params(self):
-        return [j.p for j in self.joint_segments]
+        return [j.b for j in self.joint_segments]
 
     @property
     def err_t(self):
@@ -356,7 +361,7 @@ class SegmentList(object):
 
         if len(self.segments) > 0:
             last = self.segments[-1]
-            uncap_end_segment(last.params)
+
             prior_velocities = last.final_velocities
         else:
             prior_velocities = [0] * len(joint_distances)
@@ -385,6 +390,8 @@ class SegmentList(object):
 
     def update_window(self, i):
         from trajectory.exceptions import ConvergenceError
+
+        return
 
         for _ in range(4):
             prior_update = self._update_window(i)
@@ -430,9 +437,9 @@ class SegmentList(object):
         nxt = []
 
         for js in self.segments[i]:
-            prior.append(js.prior_js.p if js.prior_js else None)
-            current.append(js.p)
-            nxt.append(js.next_js.p if js.next_js else None)
+            prior.append(js.prior_js.b if js.prior_js else None)
+            current.append(js.b)
+            nxt.append(js.next_js.b if js.next_js else None)
 
         return prior, current, nxt
 
@@ -464,8 +471,8 @@ class SegmentList(object):
         """Check that the c error in each of the segments is less than X%"""
         for s in self:
             for js in s:
-                if js.p.x != 0:
-                    rel_error = abs(js.err_x / js.p.x)
+                if js.b.x != 0:
+                    rel_error = abs(js.err_x / js.b.x)
                     if js.err_x > limit:
                         raise ValidationError(f"{js.id} Excessive error. err_x={js.err_x} re={rel_error}")
 
@@ -506,13 +513,13 @@ class SegmentList(object):
     def discontinuities(self):
         """Yield segment pairs with velocity discontinuities"""
         for c, n in self.joint_pairs:
-            if round(c.p.v_1, 2) != round(n.p.v_0, 2):
+            if round(c.b.v_1, 2) != round(n.b.v_0, 2):
                 yield c, n
 
     def has_discontinuity(self, s1, s2):
 
         for js1, js2 in zip(s1, s2):
-            if js1.p.v_1 != js2.p.v_0:
+            if js1.b.v_1 != js2.b.v_0:
                 return True
 
     @property

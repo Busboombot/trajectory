@@ -102,6 +102,11 @@ class Joint(object):
         self.a_max = a_max
         self.d_max = d_max if d_max is not None else self.a_max
 
+    def new_block(self, x, v_0=None, v_1=None):
+        v_0 = v_0 if v_0 is not None else self.v_max
+        v_1 = v_1 if v_1 is not None else self.v_max
+        return Block(x=x, v_0=v_0, v_1=v_1, joint=self)
+
 
 class SubSegment(object):
     """A sub segment is a portion of the trajectory with a constant

@@ -2,6 +2,103 @@ from math import sqrt
 
 
 
+@dataclass
+class ULInfo:
+    t: float = None # total time
+    x: float = None
+    t_i: float = None # Times to reach upper/lower intersections with v_c
+    t_a: float = None # Acel time on upper intersection
+    t_c: float = None
+    t_d: float = None
+    v_c: float = None  # v_c at upper intersection ( time = t_a )
+    x_a: float = None # Acell distance for upper intersection
+    x_c: float = None
+    x_d: float = None  # Acell distance for upper intersection
+    x_ad: float = None  # total x for v_c at upper intersection
+    t_ad: float = None  # total time to execute move for upper intersection
+
+    hit_limit: bool = False
+
+    @classmethod
+    def for_t(cls, b, s, limit_value):
+        """ Find the intersection between the acceleration and deceleration lines,
+        for a fixed value of t
+
+        :param b:
+        :type b:
+        :param s:
+        :type s:
+        :param limit_value:
+        :type limit_value:
+        :return:
+        :rtype:
+        """
+
+        i = ULInfo()
+
+        # Point at which the acceleration line through v_0 meets the deceleration
+        # line through v_1 ( or vice vesa for the lower intersection )
+        i.t_i = (b.joint.a_max * b.t - s*b.v_0 + s*b.v_1) / (2 * b.joint.a_max)  #  intersection time
+
+        i.v_c = b.v_0 + s*b.joint.a_max * i.t_i # v_c
+        print(b.v_0 , s*b.joint.a_max , i.t_i)
+
+        if  True or (0 <= i.v_c <= b.joint.v_max):
+            # Valid upper intersection
+            i.x_ad, i.t_ad = accel_acd(b.v_0, i.v_c, b.v_1, b.joint.a_max)
+            i.x_c = 0
+            i.t_c = 0
+            i.hit_limit= False
+            i.t = i.t_ad
+        else:
+            # above v_max, so v_c is _max
+            i.v_c = limit_value
+
+            # Time to reach v_c= v_max and decel to v_1. Will *not* cover all of
+            # the distance.
+            i.x_ad, i.t_ad = accel_acd(b.v_0, i.v_c, b.v_1, b.joint.a_max)
+            i.x_c = b.x - i.x_ad
+            i.t_c = i.x_c/i.v_c if i.v_c != 0 else 0
+            i.hit_limit = True
+
+        i.x_a, i.t_a = accel_xt(b.v_0, i.v_c, b.joint.a_max)
+        i.x_d, i.t_d = accel_xt(i.v_c, b.v_1, b.joint.a_max)
+
+        i.t = i.t_a + i.t_c + i.t_d
+        i.x = i.x_a + i.x_c + i.x_d
+
+        return i
+
+@dataclass
+class Info:
+    x: float = 0
+    t: float = 0
+
+    u: ULInfo = None
+    l: ULInfo = None
+
+
+    @classmethod
+    def for_t(cls, b):
+        """Calculate parameters based on a fixed x and t"""
+        i = Info()
+
+        i.t = b.t
+        i.x = b.x
+
+        i.u = ULInfo.for_t(b, 1, b.joint.v_max)
+        i.l = ULInfo.for_t(b, -1, 0)
+
+        return i
+
+
+    @classmethod
+    def for_v_c(cls, b):
+
+        x_a, t_a = accel_xt(b.v_0, b.v_c, b.joint.a_max)
+        x_d, t_d = accel_xt(b.v_c, b.v_1, b.joint.a_max)
+
+
 def hex_v_c_convex(x, t, v_0, v_1, v_max, a_max):
     """ Find the v_c for a pentagon, through decompositions
 
@@ -215,4 +312,22 @@ def nearly_equal_velocity(a, b):
 
 def nearly_equal_time(a, b):
     return abs(a - b) / abs(a + b) < .02
+
+X_LOWER_LIMIT = 10
+
+
+
+
+def triangular_area(v_0, v_1, v_c, a_max):
+    """Area of a triangular profile, which accelerates to v_c and
+    immediately decelerates"""
+    return (2 * a_max * (v_0 + v_1) + (v_0 - v_c) ** 2 + (v_1 - v_c) ** 2) / (2 * a_max)
+
+
+#####
+# Group operations
+#####
+
+
+
 

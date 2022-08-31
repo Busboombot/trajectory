@@ -42,6 +42,16 @@ def sign(x):
         return -1
 
 
+def same_sign(a, b):
+    return int(a) == 0 or int(b) == 0 or sign(a) == sign(b)
+
+
+def maxmin(l, v, h):
+    return max(min(v, h), l)
+
+
+
+
 def halve_boundary_velocities(p):
     """Reduce v_1 by halves, then v_0, finally set them to 0 """
 
@@ -80,26 +90,47 @@ def make_area_error_func(x, t, v_0, v_1, v_max, a_max, collar=True):
     return f
 
 
-def calc_area(t, v_0, v_c, v_1, v_max, a_max):
-    """ Calculate
-
-    t_a = (v_c - v_0) / a
-    t_d = (v_1 - v_c) / -a
-    x_a = ((v_0 + v_c) / 2) * t_a
-    x_d = ((v_c + v_1) / 2) * t_d
-
-    t_c = t - (t_a + t_d)
-    x_c = t_c/v_c
-
-    x_pent = simplify(x_a+x_c+x_d)
-
+def update_boundary_velocities(p: "Block", c: "Block", n: "Block"):
+    """v_1_max may need to be specified if the next segment has a very short
+    travel, or zero, because it may not be possible to decelerate during the phase.
+    For instance, if next segment has x=0, then v_1 must be 0
     """
 
-    # return (a_max*t - v_0**2*v_c/2 + v_0 - v_1**2*v_c/2 + v_1 + v_c**3 - 2*v_c)/(a_max*v_c)
+    # Note that routine only links velocities backwards,
+    # that is c.v_0 <- p.v_1. Let the segment determine it's
+    # v_1, subject to p.v_0_max, and then the next segment
+    # will link backwards to this one.
 
-    # or: x_pent = simplify(x_a+x_d), since this equation doesn't seem to do anything with x_c
-    return (-v_0 ** 2 - v_1 ** 2 + 2 * v_c ** 2) / (2 * a_max)
+    if p is None:
+        # prior == None means that this is the first
+        # in the list
+        c.v_0_max = c.v_0 = 0
+    else:
+        if c.x == 0 or p.x == 0 or not same_sign(p.d, c.d):
+            c.v_0 = c.v_0_max = 0
+        else:
+            c.v_0_max = min(p.v_1_max, c.v_0_max)
 
+        c.v_0 = min(p.v_1, c.v_0_max)
+
+    if n is None:
+        # nxt == none means this is the last in the list
+        c.v_1_max = c.v_1 = 0
+    else:
+        if c.x == 0 or n.x == 0 or not same_sign(n.d, c.d):
+            c.v_1 = c.v_1_max = 0
+        else:
+            c.v_1_max = min(n.v_0_max, c.v_1_max)
+
+    c.v_1 = maxmin(c.v_1_min, c.v_1, c.v_1_max)
+    c.v_0 = maxmin(c.v_0_min, c.v_0, c.v_0_max)
+
+    assert n is not None or (c.v_1 == 0), 'V_1 should be 0 on last segment. '
+
+    if p and p.v_1 != c.v_0:
+        return True  # signal that v_0 changed so may need to update the prior
+    else:
+        return False
 
 @dataclass
 class Joint:
@@ -341,7 +372,7 @@ class Block:
                 self.flag = 'RV' # 1.5% of test cases
 
         assert self.v_c >= 0, (self.v_c, self.flag)
-        assert round(self.area) == self.x
+        assert round(self.area) == self.x, (self.area, self.x)
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
         self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)

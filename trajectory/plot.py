@@ -119,7 +119,6 @@ def plot_params_df(*args):
     df['t'] = df.groupby('axis').del_t.cumsum()
     df = df.fillna(0)
 
-
     return df
 
 
