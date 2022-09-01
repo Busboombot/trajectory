@@ -58,20 +58,6 @@ MAX_ERR_T = 1e-4
 
 
 @dataclass
-class Joint:
-    """Represents a single joint, with a maximum velocity and acceleration"""
-    v_max: float
-    a_max: float
-    n: int = None
-
-    def new_block(self, x, v_0=None, v_1=None):
-        v_0 = v_0 if v_0 is not None else self.v_max
-        v_1 = v_1 if v_1 is not None else self.v_max
-        return Block(x=x, v_0=v_0, v_1=v_1, joint=self).init()
-
-
-
-@dataclass
 class SubSegment:
     """A sub segment is a portion of the trajectory with a constant
     acceleration,  one of the aceleration, constant (cruise) or decleration portions. """
@@ -138,7 +124,7 @@ class JointSegment(object):
         self.next_js = None
         self.prior_js = None
 
-        self.b = self.joint.new_block(x, v_0, v_1)
+        self.b = self.joint.new_block(x, v_0, v_1).init()
 
     @property
     def id(self):
@@ -200,7 +186,7 @@ class Segment(object):
     n: int = None
     next_seg: "Segment" = None
     prior_seg: "Segment" = None
-    joint_segments: "JointSegment" = None
+    joint_segments: "List[JointSegment]" = None
     t: float = 0
 
     n_updates: int = 0
@@ -217,6 +203,9 @@ class Segment(object):
 
         self.t = max(js.b.t_min for js in self.joint_segments)
 
+        if prior:
+            Segment.link(prior,self)
+
     @classmethod
     def link(cls, prior: "Segment", current: "Segment"):
 
@@ -230,6 +219,20 @@ class Segment(object):
     @property
     def final_velocities(self):
         return [j.b.v_1 for j in self.joint_segments]
+
+    @property
+    def boundary_velocities(self):
+        """Get the boundary velocities for the v_0's of this segment
+        and the v_1's of the prior
+        :return:
+        :rtype:
+        """
+        if self.prior_seg:
+            p = self.prior_seg.joint_segments
+        else:
+            p = [None for _ in self.joint_segments]
+
+        return [ (p.b.v_1, c.b.v_0) for p, c in zip(p, self.joint_segments) ]
 
     @property
     def params(self):
@@ -357,6 +360,8 @@ class SegmentList(object):
         :type joint_distances: object
         """
 
+        self.uncap_tail()
+
         assert len(joint_distances) == len(self.joints)
 
         if len(self.segments) > 0:
@@ -373,39 +378,84 @@ class SegmentList(object):
 
         self.segments.append(s)
 
-        self.update_window(-1)
+        self.update(-1)
 
         return s
 
-    def _update_window(self, i):
+    def uncap_tail(self):
+        if len(self.segments) == 0:
+            return
 
-        w = self.get_window(i)  # columns; each is a segment
+        for j in self.segments[-1]:
+            j.b.v_1 = j.b.joint.v_max
+            j.b.init()
 
-        # prior_update is true when the prior segment should
-        # be updated
-        prior_update = any([update_boundary_velocities(p, c, n) for p, c, n in zip(*w)])
-        update_segment(w[1])
+        self.plan(-1)
 
-        return prior_update
+    def update(self, index):
 
-    def update_window(self, i):
-        from trajectory.exceptions import ConvergenceError
+        idx = len(self.segments)-1
+        for _ in range(6):
+            print("Updating", idx)
+            u = self.update_boundary(idx)
+            if u > 0:
+                print("u plan")
+                self.plan(idx)
 
-        return
-
-        for _ in range(4):
-            prior_update = self._update_window(i)
-
-            if prior_update:
-                i -= 1
+            idx -= 1
+            u = self.update_boundary(idx)
+            if u == 0:
+                break;
             else:
-                i += 1
+                self.plan(idx)
 
-            if i == 0:
+    def plan(self, index):
+        s = self.segments[index]
+
+        times = [j.b.t for j in s]
+
+        for i in range(4):
+            mt = max(times)
+
+            for j in s:
+                j.b.plan(mt)
+
+            times = [j.b.t for j in s]
+
+            if all ([t == times[0] for t in times]):
                 break
-
         else:
-            raise ConvergenceError()
+            raise ConvergenceError('Too many planning updates')
+
+
+    def update_boundary(self, index):
+
+        s = self.segments[index]
+        if not s.prior_seg:
+            return 0
+        else:
+            p = s.prior_seg
+
+        updates = 0
+        for b1, b2 in zip(p, s):
+            b1 = b1.b
+            b2 = b2.b
+
+            if  b1.v_1 != b2.v_0 or b1.v_1 != b1.v_c:
+                v = min(b1.v_1, b2.v_0)
+                v_m = (b1.v_c + b2.v_c) / 2
+
+                b1.v_1 = b1.v_c
+                b2.v_0 = b1.v_c
+
+                updates += 1
+
+            if updates > 0:
+                b1.init()
+                b2.init()
+
+        return updates
+
 
     @property
     def windows(self):
@@ -570,9 +620,15 @@ class SegmentList(object):
     def debug_str(self):
         return '\n'.join(s.debug_str() for s in self.segments)
 
-    def plot(self, ax=None):
+    def plot(self, ax=None, axis = None):
         from .plot import plot_segment_list
-        plot_segment_list(self.dataframe, ax=ax)
+
+        df = self.dataframe
+
+        if axis is not None:
+            df = df[df.axis == axis]
+
+        plot_segment_list(df, ax=ax)
 
 
 __all__ = ['SegmentList', 'Segment', 'Joint', 'JointSegment']

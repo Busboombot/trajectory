@@ -1,6 +1,4 @@
 
-from trajectory.trapmath import *
-from trajectory.profiles import *
 from trajectory.params import *
 from trajectory.plot import *
 from trajectory import ParameterError
@@ -13,7 +11,7 @@ import numpy as np
 import pickle
 import seaborn as sns
 
-from IPython.display import display
+from IPython.display import display, HTML, Markdown
 import pandas as pd
 
 from math import sqrt

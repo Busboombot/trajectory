@@ -35,34 +35,15 @@ from collections import deque
 # NUmber of ticks of the step function per second
 from trajectory.sim import SimSegment
 
+from .params import *
+
 TIMEBASE = 1_000_000  # ticks per second
 
 # Shapes
 TRAPEZOID = 1
 TRIANGLE = 2
 
-N_BIG = 2**32
 
-def binary_search(f, v_min, v_guess, v_max):
-
-    for i in range(20):
-
-        x = f(v_guess)
-
-        if round(x) > 0:
-            v_guess, v_min = (v_max + v_guess) / 2, v_guess
-
-        elif round(x) < 0:
-            v_guess, v_max = (v_min + v_guess) / 2, v_guess
-
-        else:
-            return v_guess
-
-        if abs(v_min-v_max) <1:
-            return v_guess
-
-    else:
-        return None
 
 def sign(x):
     if x == 0:
@@ -93,19 +74,6 @@ class ValidationError(SegmentError):
 
 
 
-class Joint(object):
-    """Represents a single joint, with a maximum velocity and acceleration"""
-
-    def __init__(self, v_max: float = None, a_max: float = None, d_max: float = None):
-        self.n = None
-        self.v_max = v_max
-        self.a_max = a_max
-        self.d_max = d_max if d_max is not None else self.a_max
-
-    def new_block(self, x, v_0=None, v_1=None):
-        v_0 = v_0 if v_0 is not None else self.v_max
-        v_1 = v_1 if v_1 is not None else self.v_max
-        return Block(x=x, v_0=v_0, v_1=v_1, joint=self)
 
 
 class SubSegment(object):
@@ -490,9 +458,7 @@ class Segment(object):
         else:
             self.sign_change = False
 
-
         self.update_last(prior)
-
 
     @property
     def t(self):
