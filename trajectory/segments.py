@@ -26,7 +26,6 @@ from https://www.embedded.com/generate-stepper-motor-speed-profiles-in-real-time
 
 """
 from copy import deepcopy
-from math import sqrt
 from typing import List
 from collections import deque
 
@@ -36,6 +35,7 @@ from collections import deque
 from trajectory.sim import SimSegment
 
 from .params import *
+from .planner import Joint
 
 TIMEBASE = 1_000_000  # ticks per second
 
@@ -467,12 +467,12 @@ class Segment(object):
 
     def set_next_js(self, next_seg):
         """Set the next_js for each joint segment"""
-        for j, next_js in zip(self.joint_segments, next_seg.joint_segments):
+        for j, next_js in zip(self.joint_segments, next_seg.blocks):
             j.next_js = next_js
 
     def set_prior_js(self, prior_seg):
         """Set the prior_js for each joint segment"""
-        for j, prior_js in zip(self.joint_segments, prior_seg.joint_segments):
+        for j, prior_js in zip(self.joint_segments, prior_seg.blocks):
             j.prior_js = prior_js
 
     @property
@@ -653,4 +653,4 @@ class SegmentList(object):
 # a has range of about -50K to 50K
 
 
-__all__ = ['SegmentList', 'Segment', 'Joint', 'JointSegment', 'SegmentError']
+__all__ = ['SegmentList', 'Segment', 'JointSegment', 'SegmentError']

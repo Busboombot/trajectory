@@ -35,17 +35,19 @@ Joint segment shapes
 
 """
 from collections import deque
+from dataclasses import dataclass, asdict, replace
+from math import sqrt
+from typing import List
 
 import pandas as pd
 
-from .exceptions import ValidationError
-from.params import *
-from typing import List
-from dataclasses import dataclass
+from . import TrapMathError, ConvergenceError
 
 ## Parameters for simulation/step generation
 
 # NUmber of ticks of the step function per second
+
+
 TIMEBASE = 1_000_000  # ticks per second
 
 # Shapes
@@ -57,101 +59,421 @@ N_BIG = 2 ** 32
 MAX_ERR_T = 1e-4
 
 
-@dataclass
-class SubSegment:
-    """A sub segment is a portion of the trajectory with a constant
-    acceleration,  one of the aceleration, constant (cruise) or decleration portions. """
+def binary_search(f, v_min, v_guess, v_max):
+    for i in range(20):
 
-    id: str
-    segment_n: int
-    joint: "Joint"
-    js: "JointSegment"
-    t: float
-    v_i: float
-    v_f: float
-    x: float
-    ss: float
-    v_0_max: float
-    v_1_max: float
-    direction: int = 1
+        x = f(v_guess)
+
+        if round(x) > 0:
+            v_guess, v_min = (v_max + v_guess) / 2, v_guess
+
+        elif round(x) < 0:
+            v_guess, v_max = (v_min + v_guess) / 2, v_guess
+
+        else:
+            return v_guess
+
+        if abs(v_min - v_max) < .05:
+            return v_guess
+
+    else:
+        return None
+
+
+def accel_xt(v_i, v_f, a):
+    """Distance and time required to accelerate from v0 to v1 at acceleration a"""
+
+    if v_f == v_i:
+        return 0, 0
+
+    if v_f < v_i:
+        a = -a
+
+    t = (v_f - v_i) / a  # Time to change from v0 to v1 at max acceleration
+    x = (v_i + v_f) / 2 * t
+
+    return x, t  # Area of velocity trapezoid
+
+
+def accel_acd(v_0, v_c, v_1, a):
+    """ Same result as running accel_xt, for v_0->v_c and v_c->v_1,
+    and adding the x and t values.
+    """
+    t_ad = (abs(v_c - v_0) + abs(v_c - v_1)) / a
+    x_ad = abs((v_0 ** 2 - v_c ** 2) / (2 * a)) + abs((v_1 ** 2 - v_c ** 2) / (2 * a))
+
+    return x_ad, t_ad
+
+
+def consistantize(b, return_error=False):
+    """Recalculate t to make x and v values integers, and everything more consistent
+     This operation will maintain the original value for x, but may change t"""
+
+    b.x_a = (b.x_a)
+    b.x_d = (b.x_d)
+    b.x_c = b.x - (b.x_a + b.x_d)
+
+    # b.v_0, b.v_c, b.v_1 = [round(e,4) for e in (b.v_0, b.v_c, b.v_1)]
+
+    b.t_a = abs((b.v_c - b.v_0) / b.joint.a_max)
+    b.t_d = abs((b.v_c - b.v_1) / b.joint.a_max)
+
+    b.t_c = b.x_c / b.v_c if b.v_c != 0 else 0
+
+    b.t = b.t_a + b.t_c + b.t_d
+
+    # Check error against area calculation
+    if return_error:
+        x_ad, t_ad = accel_acd(b.v_0, b.v_c, b.v_1, b.joint.a_max)
+        t_c = round(b.t - t_ad, 8)  # Avoid very small negatives
+        x_c = b.v_c * t_c
+        x = x_ad + x_c
+        x_e = x - b.x
+        return b.x_c, x_e
+    else:
+        return b.x_c
+
+
+def sign(x):
+    if x == 0:
+        return 0
+    elif x > 0:
+        return 1
+    else:
+        return -1
+
+
+def same_sign(a, b):
+    return int(a) == 0 or int(b) == 0 or sign(a) == sign(b)
+
+
+def maxmin(l, v, h):
+    return max(min(v, h), l)
+
+
+def make_area_error_func(b):
+    def f(v_c):
+        return b.x - b.replace(v_c=v_c).arear
+
+    return f
+
+
+def set_bv(x, v_0, v_1, a_max):
+    """Reduce v_0 and v_1 for small values of x when there is an
+    error in x after planning """
+
+    x_a, t_a = accel_xt(v_0, 0, a_max)
+    x_d = x - x_a
+
+    if x_d < 0:
+        v_0 = sqrt(2 * a_max * x)
+        v_1 = 0
+    else:
+        v_0 = v_0
+        v_1 = min(sqrt(2 * a_max * x_d), v_1)
+
+    return (v_0, v_1)
+
+
+@dataclass
+class Joint:
+    v_max: float
+    a_max: float
+    # distances below the small x limit will never hit v_max before needing to decelerate
+    small_x: float = None
 
     def __post_init__(self):
-        assert self.v_i == 0 or self.v_f == 0 or sign(self.v_i) == sign(self.v_f), \
-            f"Inconsistent directions {self.v_i} {self.v_f} for {self.id}{self.ss} "
+        self.small_x = (self.v_max ** 2) / (self.a_max)
 
-    def set_direction(self, sign) -> None:
-        self.direction = sign
-        self.v_i *= sign
-        self.v_f *= sign
-        self.x *= sign
+    def new_block(self, x, v_0=None, v_1=None):
+        v_0 = v_0 if v_0 is not None else self.v_max
+        v_1 = v_1 if v_1 is not None else self.v_max
 
-    def __repr__(self):
-        return f"<{self.joint.n} {self.ss} {self.t:2.5f} {int(self.x):5d} {self.v_i:5.0f}->{self.v_f:5.0f}> "
-
-    @property
-    def row(self):
-        return [self.segment_n, self.joint.n, self.x, self.v_i, self.v_f, self.ss, self.t, self.v_1_max, self.v_0_max]
+        return Block(x=x, v_0=v_0, v_1=v_1, joint=self)
 
 
-class JointSegment(object):
-    """One segment for one joint"""
+@dataclass
+class Block:
+    x: float = 0
+    t: float = 0
+    t_a: float = 0
+    t_c: float = 0
+    t_d: float = 0
+    x_a: float = 0
+    x_c: float = 0
+    x_d: float = 0
+    v_0: float = 0
+    v_c: float = 0
+    v_1: float = 0
+    d: int = 0  # direction, -1 or 1
 
-    joint: Joint
-    segment: 'Segment'
-    next_js: 'JointSegment'
-    prior_js: 'JointSegment'
+    v_0_max = None
+    v_1_max = None
 
-    b: Block
+    joint: Joint = None
+    segment: 'Segment' = None
+    next: 'Block' = None
+    prior: 'Block' = None
+
+    flag: str = None
+    recalcs: int = 0
 
     _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
                     'v_1',
                     'v_1_max']
 
-    def __init__(self, joint: Joint = None, x: float = None, v_0: float = 0, v_1: float = 0):
-        """
-
-        :param joint:
-        :type joint:
-        :param x:
-        :type x:
-        :param init_v0: # Initial segment velocity, for case when a new segment is being added to existing queue
-        :type init_v0:
-        """
-
-        self.joint = joint
-        self.segment = None  # set after adding to a segment
-
-        self.next_js = None
-        self.prior_js = None
-
-        self.b = self.joint.new_block(x, v_0, v_1).init()
-
     @property
     def id(self):
         return f"{self.segment.n}/{self.joint.n}"
 
-    @property
-    def err_x(self):
-        """Return true of the subsegment error is larger than 3% of the x"""
-        if self.b.x != 0:
-            return 0
-        else:
-            return 0
+    def __post_init__(self):
+        self.d = sign(self.x)
+        self.x = abs(self.x)
+        self.v_0_max = self.joint.v_max
+        self.v_1_max = self.joint.v_max
+
+    def asdict(self):
+        return asdict(self)
+
+    def replace(self, **kwds):
+        return replace(self, **kwds)
 
     @property
     def subsegments(self):
-        return [SubSegment(self.id, self.segment.n, self.joint, self, *ss, self.b.v_0_max, self.b.v_1_max)
-                for ss in self.b.subsegments]
+
+        rd = round  # lambda v, n: v
+        subsegs = (
+            (rd(self.t_a, 7), rd(self.v_0, 2), rd(self.v_c, 2), rd(self.x_a, 0), 'a'),
+            (rd(self.t_c, 7), rd(self.v_c, 2), rd(self.v_c, 2), rd(self.x_c, 0), 'c'),
+            (rd(self.t_d, 7), rd(self.v_c, 2), rd(self.v_1, 2), rd(self.x_d, 0), 'd')
+        )
+
+        return [SubSegment(self.id, self.segment.n, self.joint, self, *ss) for ss in subsegs]
+
+    @property
+    def area(self):
+        """Calculate the distance x as the area of the profile. Ought to
+        always match .x """
+
+        x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+
+        t_c = round(self.t - t_ad, 8)  # Avoid very small negatives
+
+        if t_c < 0:
+            raise TrapMathError(f'Negative t_c ({t_c}) ')
+
+        x_c = self.v_c * t_c
+
+        if round(x_c) < 0:
+            raise TrapMathError(f'Negative x_c ({x_c}) t_c={t_c}')
+
+        return x_ad + x_c
+
+    @property
+    def arear(self):
+        """Robust area calculation. May return wrong results for bad parameters, but
+        will not throw exceptions"""
+
+        x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+
+        t_c = max(self.t - t_ad, 0)
+        x_c = max(self.v_c, 0) * t_c
+
+        return x_ad + x_c
+
+    def init(self):
+
+        a_max = self.joint.a_max
+        v_max = self.joint.v_max
+
+        # Limit the boundary values for small moves
+        self.v_0, self.v_1 = set_bv(self.x, self.v_0, self.v_1, self.joint.a_max)
+
+        self.v_0 = min(self.v_0, v_max)
+        self.v_1 = min(self.v_1, v_max)
+
+        if self.x == 0:
+            self.v_c = self.v_0 = self.v_1 = 0
+            self.flag = 'Z'
+
+        elif self.x < self.joint.small_x:
+            # The limit is the same one used for set_bv.
+            # the equation here is the sympy solution to:
+            # t_a = (v_c - v_0) / a
+            # t_d = (v_1 - v_c) / -a
+            # x_a = ((v_0 + v_c) / 2) * t_a
+            # x_d = ((v_c + v_1) / 2) * t_d
+            # x_c = x - (x_a + x_d)
+            # solve(x_c, v_c)[1]
+
+            self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
+            self.v_c = min(self.v_c, v_max)  # formula errs for short segments
+            self.flag = 'S'
+        else:
+            # If there is more area than the triangular profile for these boundary
+            # velocities, the v_c must be v_max. In this case, it must also be true that:
+            #    x_ad, t_ad = accel_acd(self.v_0, v_max, self.v_1, a_max)
+            #    assert self.x > x_ad
+            self.v_c = v_max
+            self.flag = 'M'
+
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+
+        assert round(self.x_a + self.x_d) <= self.x
+
+        self.x_c = self.x - (self.x_a + self.x_d)
+        self.t_c = self.x_c / self.v_c if self.v_c != 0 else 0
+        self.t = self.t_a + self.t_c + self.t_d
+
+        assert round(self.x_c) >= 0, (self.x_c, self.v_c, self.flag, self)
+        assert abs(self.area - self.x) < 1, (self.x, self.area, self.t, self.v_0, self.v_1)
+        return self
+
+    def plan_ramp(self, t):
+        """Calculate a ramp profile for a fixed time"""
+
+        self.t = t
+
+        if self.x == 0 or self.t == 0:
+            self.set_zero()
+            self.t_c = self.t = t
+            self.flag = 'Z'  # 5% of test cases
+            return self
+
+        def err(v_c):
+            x_a, t_a = accel_xt(self.v_0, v_c, self.joint.a_max)
+            t_c = self.t - t_a
+            x_c = v_c * t_c
+
+            return self.x - (x_a + x_c)
+
+        self.v_1 = self.v_c = binary_search(err, 0, self.x / self.t, self.joint.v_max)
+
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
+
+        self.t_d, self.x_d = 0, 0
+
+        consistantize(self)
+
+        self.flag = "PR"
+
+        assert self.v_0 <= self.joint.v_max
+        assert self.v_c <= self.joint.v_max
+        assert self.v_1 <= self.joint.v_max
+
+        return self
+
+    def set_zero(self):
+
+        self.flag = ''  # 5% of test cases
+        self.x_a = self.x_d = self.x_c = 0
+        self.t_a = self.t_d = self.t_c = 0
+        self.v_0 = self.v_c = self.v_1 = 0
+
+    def plan(self, t):
+
+        self.t = t
+
+        a_max = self.joint.a_max
+        v_h = max(self.v_0, self.v_1)
+
+        if self.x == 0 or self.t == 0:
+            self.set_zero()
+            self.t_c = self.t = t
+            self.flag = 'Z'  # 5% of test cases
+            return self
+
+        elif self.v_0 == 0 and self.v_1 == 0:
+            # should always be the lower root
+            # Compare to equation 3.6 of Biagiotti
+            # Sympy:
+            # t_ad = v_c / a  # acel and decel are symmetric
+            # x_ad = a * t_ad ** 2 / 2
+            # x_c = x - 2 * x_ad
+            # t_c = t - 2 * t_ad
+            # solve(Eq(v_c, simplify(x_c / t_c)), v_c)
+            try:
+                self.v_c = a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * self.x)) / 2
+                self.flag = 'TZ1'  # .16% of test cases
+            except ValueError:
+                self.v_c = sqrt(self.x * a_max)
+                self.flag = 'TZ2'  # .16% of test cases
+
+            self.v_c = min(self.v_c, self.joint.v_max)
+
+        elif self.x >= v_h * self.t and self.v_0 == self.v_1:
+            # subtract off v_0, v_1 and the corresponding x and run again.
+            x_ = self.v_0 * self.t
+
+            # This is the same case as v_0 == v_1 == 0, but after subtracting off
+            # the area of the rectangular base, from v =0 to v=v_0. Then we add back in
+            # v_0.
+            self.v_c = self.v_0 + a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * (self.x - x_))) / 2
+            assert self.v_c <= self.joint.v_max
+            self.flag = 'T0'
+        else:
+
+            # Find v_c with a binary search, then patch it up if the
+            # selection changes the segment time.
+            self.v_c = binary_search(make_area_error_func(self), 0,
+                                     self.x / self.t, self.joint.v_max)
+            assert self.v_c <= self.joint.v_max
+            self.flag = 'O'
+
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+
+        # consistantize will make all of the values consistent with each other,
+        # and if anthing is wrong, it will show up in a negative x_c
+
+        x_c = consistantize(self)
+
+        if x_c < 0 or (self.x > 25 and abs(round(self.area) - self.x)) > 1:
+            # We've probably got a really small move, and we've already tried
+            # reducing boundary velocities, so get more aggressive. If that
+            # doesn't work, allow the time to expand.
+
+            new_t = max(self.t_a + self.t_d, self.t)
+
+            if self.v_1 > 0:
+                self.v_1 = 0
+                b = self.plan(t)
+                b.flag = 'V1Z'
+                return b
+            elif self.v_0 > 0:
+                self.v_0 = 0
+                b = self.plan(t)
+                b.flag = 'V0Z'
+                return b
+            elif new_t != self.t:
+                b = self.plan(new_t)
+                b.flag = 'NT'
+                return b
+            else:
+                raise ConvergenceError(
+                    f'Unsolvable profile: x={self.x}, x_ad={self.x_a + self.x_d} t={self.t} t_ad={self.t_a + self.t_d}')
+
+        assert round(self.x_a + self.x_d) <= self.x
+        assert self.t_a + self.t_d <= self.t
+        assert self.v_c >= 0, (self.v_c, self.flag)
+        assert abs(self.area - self.x) < 2, (self.area, self)
+        assert self.t > 0
+        assert self.v_0 <= self.joint.v_max
+        assert self.v_c <= self.joint.v_max
+        assert self.v_1 <= self.joint.v_max
+
+        return self
 
     def __str__(self):
         from colors import color, bold
 
-        v0 = color(f"{int(self.b.v_0):<5d}", fg='green')
-        xa = bold(f"{int(self.b.d * self.b.x_a):>6d}")
-        c = bold(f"{int(round(self.b.d * self.b.x_c)):>6d}")
-        vc = color(f"{int(self.b.v_c):<6d}", fg='blue')
-        xd = bold(f"{int(self.b.d * self.b.x_d):<6d}")
-        v1 = color(f"{int(self.b.v_1):>5d}", fg='red')
+        v0 = color(f"{int(self.v_0):<5d}", fg='green')
+        xa = bold(f"{int(self.d * self.x_a):>6d}")
+        c = bold(f"{int(round(self.d * self.x_c)):>6d}")
+        vc = color(f"{int(self.v_c):<6d}", fg='blue')
+        xd = bold(f"{int(self.d * self.x_d):<6d}")
+        v1 = color(f"{int(self.v_1):>5d}", fg='red')
 
         return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
 
@@ -166,115 +488,193 @@ class JointSegment(object):
 
         from colors import color, bold
 
-        v0_max = color(f"{int(self.b.v_0_max):<5d}", fg='green')
-        v0 = color(f"{int(self.b.v_0):<5d}", fg='green')
-        xa = bold(f"{int(self.b.d * self.b.x_a):>6d}")
-        ta = bold(f"{int(self.b.d * self.b.t_a):<1.5f}")
-        c = bold(f"{int(round(self.b.d * self.b.x_c))}")
-        vc = color(f"{int(self.b.v_c)}", fg='blue')
-        tc = bold(f"{int(self.b.d * self.b.t_c):<1.5f}")
-        xd = bold(f"{int(self.b.d * self.b.x_d):>6d}")
-        td = bold(f"{int(self.b.d * self.b.t_d):<1.5f}")
-        v1 = color(f"{int(self.b.v_1):>5d}", fg='red')
-        v1_max = color(f"{int(self.b.v_1_max):>5d}", fg='red')
+        v0_max = color(f"{int(self.v_0_max):<5d}", fg='green')
+        v0 = color(f"{int(self.v_0):<5d}", fg='green')
+        xa = bold(f"{int(self.d * self.x_a):>6d}")
+        ta = bold(f"{int(self.d * self.t_a):<1.5f}")
+        c = bold(f"{int(round(self.d * self.x_c))}")
+        vc = color(f"{int(self.v_c)}", fg='blue')
+        tc = bold(f"{int(self.d * self.t_c):<1.5f}")
+        xd = bold(f"{int(self.d * self.x_d):>6d}")
+        td = bold(f"{int(self.d * self.t_d):<1.5f}")
+        v1 = color(f"{int(self.v_1):>5d}", fg='red')
+        v1_max = color(f"{int(self.v_1_max):>5d}", fg='red')
 
         return f"[{v0_max}|{v0} {xa}%{ta} ↗ {c}@{vc}%{tc} ↘ {xd}%{td} {v1}|{v1_max}]"
+
 
 class Segment(object):
     """One segment, for all joints"""
 
     n: int = None
-    next_seg: "Segment" = None
-    prior_seg: "Segment" = None
-    joint_segments: "List[JointSegment]" = None
+    next: "Segment" = None
+    prior: "Segment" = None
+    blocks: "List[Block]" = None
     t: float = 0
 
     n_updates: int = 0
 
     updates: List[str]
 
-    def __init__(self, n, joint_segments: List[JointSegment], prior=None):
+    def __init__(self, n, blocks: List[Block], prior=None):
 
         self.n = n
-        self.joint_segments = joint_segments
+        self.blocks = blocks
 
-        for js in self.joint_segments:
-            js.segment = self
-
-        self.t = max(js.b.t_min for js in self.joint_segments)
+        for b in self.blocks:
+            b.segment = self
 
         if prior:
-            Segment.link(prior,self)
+            Segment.link(prior, self)
 
     @classmethod
     def link(cls, prior: "Segment", current: "Segment"):
 
-        prior.next_seg = current
-        current.prior_seg = prior
+        prior.next = current
+        current.prior = prior
 
-        for p, c in zip(prior.joint_segments, current.joint_segments):
-            p.next_js = c
-            c.prior_js = p
+        for p, c in zip(prior.blocks, current.blocks):
+            p.next = c
+            c.prior = p
+
+    def init(self):
+        """Re-initialize all of the blocks"""
+        for j in self:
+            j.init()
+
+        return self
+
+    def plan(self, style='T'):
+        for i in range(4):
+            mt = max(self.times)
+
+            for j in self:
+                if style == 'R':
+                    j.plan_ramp(mt)
+                else:
+                    j.plan(mt)
+
+            if self.times_e_rms < 0.001:
+                break
+        else:
+            raise ConvergenceError(f'Too many planning updates. times={self.times}')
+
+    def update_0_boundary(self):
+        if not self.prior:
+            return
+
+        for p, c in zip(self.prior.blocks, self.blocks):
+            c.v_0 = min(c.v_0, p.v_1)
+
+
+    def update_1_boundary(self):
+        """ Give this block v_1s that match the v_0 of the next block
+        :return:
+        :rtype:
+        """
+        if not self.next:
+            return
+
+        for c, n in zip(self.blocks, self.next.blocks):
+            c.v_1 = min(c.v_1, n.v_0)
+
+
 
     @property
     def final_velocities(self):
-        return [j.b.v_1 for j in self.joint_segments]
+        return [j.v_1 for j in self.blocks]
 
     @property
-    def boundary_velocities(self):
+    def boundary_velocities_0(self):
         """Get the boundary velocities for the v_0's of this segment
         and the v_1's of the prior
         :return:
         :rtype:
         """
-        if self.prior_seg:
-            p = self.prior_seg.joint_segments
+        if self.prior:
+            p = self.prior.blocks
         else:
-            p = [None for _ in self.joint_segments]
+            p = [None for _ in self.blocks]
 
-        return [ (p.b.v_1, c.b.v_0) for p, c in zip(p, self.joint_segments) ]
+        return [(p.v_1 if p is not None else None,
+                 c.v_0 if c is not None else None)
+                for p, c in zip(p, self.blocks)]
+
+    @property
+    def boundary_velocities_1(self):
+        """Get the boundary velocities for the v_1's of this segment
+        and the v_1's of the prior
+        :return:
+        :rtype:
+        """
+        if self.next:
+            n = self.next.blocks
+        else:
+            n = [None for _ in self.blocks]
+
+        return [(c.v_1 if c is not None else None,
+                 n.v_0 if n is not None else None)
+                for n, c in zip(n, self.blocks)]
+
+    @property
+    def has_0_discontinuity(self):
+        return not all(a is None or a == b for a, b in self.boundary_velocities_0)
+
+    def fix_boundary_bumps(self):
+        """Check if the boundary velocity is larger than either of the v_c"""
+        fixes = 0
+
+        if not self.prior:
+            return 0
+
+        for p,c in zip(self.prior.blocks, self.blocks):
+
+            v_c_m = (p.v_c+c.v_c)/2
+
+            if c.v_0 > v_c_m:
+                c.v_0 = v_c_m
+                p.v_1 = v_c_m
+                fixes += 1
+
+        return fixes
+
+
+
+    @property
+    def has_1_discontinuity(self):
+        return not all(b is None or a == b for a, b in self.boundary_velocities_1)
 
     @property
     def params(self):
-        return [j.b for j in self.joint_segments]
-
-    @property
-    def err_t(self):
-        """RMS error between joint segment calculated times and segment time"""
-        err = sqrt(sum([(js.t - self.t) ** 2 for js in self.joint_segments]))
-
-        return err / len(self.joint_segments) / self.t
-
-    @property
-    def err_x(self):
-        """RMS error between joint segment calculated times and segment time"""
-        dist = sum(js.x for js in self.joint_segments)
-        err = sqrt(sum([(js.err_x) ** 2 for js in self.joint_segments]))
-
-        return err / dist
-
-    @property
-    def max_err_x(self):
-        return max([js.err_x for js in self])
+        return [j for j in self.blocks]
 
     @property
     def times(self):
-        return [self.t] + [js.t for js in self.joint_segments]
+        return [round(js.t, 6) for js in self.blocks]
 
     @property
-    def min_t(self):
-        return max([js.t for js in self.joint_segments])
+    def times_e_rms(self):
+        """Compute the RMS difference of the times from the mean time"""
+        import numpy as np
+        times = self.times
+        s = sum(times)
+        m = s / len(times)
+        return np.sqrt(np.sum([(t - m) ** 2 for t in times]))
+
+    @property
+    def min_time(self):
+        return min(self.times)
 
     @property
     def params_df(self):
 
         from operator import attrgetter
-        ag = attrgetter(*JointSegment._param_names)
+        ag = attrgetter(*Block._param_names)
 
-        columns = ['seg', 'js', 'seg_t'] + JointSegment._param_names + ['calc_x', 'sum_x', 'calc_t']
+        columns = ['seg', 'js', 'seg_t'] + Block._param_names + ['calc_x', 'sum_x', 'calc_t']
 
         rows = []
-        for j, js in enumerate(self.joint_segments):
+        for j, js in enumerate(self.blocks):
             r = (self.n, j, js.segment.t) + ag(js) + (js.calc_x, js.sum_x, js.calc_t)
             assert len(columns) == len(r)
             d = dict(zip(columns, r))
@@ -304,27 +704,65 @@ class Segment(object):
 
     def load(self, d):
 
-        for js, e in zip(self.joint_segments, d):
+        for js, e in zip(self.blocks, d):
             for k, v in e.items():
                 setattr(js, k, v)
 
     @property
     def subsegments(self):
-        for js in self.joint_segments:
-            yield from js.subsegments
+        for b in self.blocks:
+            yield from b.subsegments
 
     def __iter__(self):
-        return iter(self.joint_segments)
+        return iter(self.blocks)
 
     def __getitem__(self, item):
-        return self.joint_segments[item]
+        return self.blocks[item]
 
     def __str__(self):
 
-        return f"{self.t:>3.4f}|" + ' '.join(str(js) for js in self.joint_segments) + f" {round(self.max_err_x, 2)}"
+        return f"{self.t:>3.4f}|" + ' '.join(str(js) for js in self.blocks)
 
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
+
+    def plot(self, ax=None):
+        from .plot import  plot_params
+        plot_params(self.blocks, ax=ax)
+
+
+@dataclass
+class SubSegment:
+    """A sub segment is a portion of the trajectory with a constant
+    acceleration,  one of the aceleration, constant (cruise) or decleration portions. """
+
+    id: str
+    segment_n: int
+    joint: "Joint"
+    js: "Block"
+    t: float
+    v_i: float
+    v_f: float
+    x: float
+    ss: float
+    direction: int = 1
+
+    def __post_init__(self):
+        assert self.v_i == 0 or self.v_f == 0 or sign(self.v_i) == sign(self.v_f), \
+            f"Inconsistent directions {self.v_i} {self.v_f} for {self.id}{self.ss} "
+
+    def set_direction(self, sign) -> None:
+        self.direction = sign
+        self.v_i *= sign
+        self.v_f *= sign
+        self.x *= sign
+
+    def __repr__(self):
+        return f"<{self.joint.n} {self.ss} {self.t:2.5f} {int(self.x):5d} {self.v_i:5.0f}->{self.v_f:5.0f}> "
+
+    @property
+    def row(self):
+        return [self.segment_n, self.joint.n, self.x, self.v_i, self.v_f, self.ss, self.t]
 
 
 class SegmentList(object):
@@ -344,41 +782,60 @@ class SegmentList(object):
         self.segments = deque()
         self.positions = [0] * len(self.joints)
 
-    def new_segment(self, joint_distances, prior_velocities):
+    def new_segment(self, x: List[int], prior_velocities):
 
-        js = [JointSegment(j, x=x, v_0=v_0) for j, x, v_0
-              in zip(self.joints, joint_distances, prior_velocities)]
+        blocks = [j.new_block(x=x, v_0=v_0, v_1=0) for j, x, v_0 in zip(self.joints, x, prior_velocities)]
 
         prior = self.segments[-1] if len(self.segments) > 0 else None
 
-        s = Segment(len(self.segments), js, prior)
+        s = Segment(len(self.segments), blocks, prior)
 
         return s
 
-    def rmove(self, joint_distances: List[int], update=True):
+    def rmove(self, x: List[int], update=True):
         """Add a new segment, with joints expressing joint distance
-        :type joint_distances: object
+        :type x: object
         """
 
         self.uncap_tail()
 
-        assert len(joint_distances) == len(self.joints)
+        assert len(x) == len(self.joints)
 
         if len(self.segments) > 0:
-            last = self.segments[-1]
+            prior = self.segments[-1]
+            prior_velocities = []
 
-            prior_velocities = last.final_velocities
+            for p, c_x in zip(prior.blocks, x):
+                if not same_sign(p.x, c_x):
+                    prior_velocities.append(0) # changed direction, so must be 0
+                else:
+                    prior_velocities.append(p.v_1)
+
         else:
-            prior_velocities = [0] * len(joint_distances)
+            prior_velocities = [0] * len(x)
 
-        s = self.new_segment(joint_distances, prior_velocities)
+        s = self.new_segment(x, prior_velocities)
 
         if len(self.segments) > 0:
             Segment.link(self.segments[-1], s)
 
         self.segments.append(s)
 
-        self.update(-1)
+        s.init().plan()
+
+        if s.has_0_discontinuity:
+            # We'd commanded the blocks in this segment to have the same v_0 as
+            # the prior blocks v_1 when this block was created, so if there is a
+            # boundary discontinuity, it's because a block in this segment can't be
+            # solved without reducing it's v_0. So we'll have to replan the prior block
+            assert s.prior is not None
+
+            s.prior.update_1_boundary()
+            s.prior.plan()
+
+        if s.fix_boundary_bumps():
+            s.prior.plan()
+            s.plan()
 
         return s
 
@@ -386,161 +843,21 @@ class SegmentList(object):
         if len(self.segments) == 0:
             return
 
-        for j in self.segments[-1]:
-            j.b.v_1 = j.b.joint.v_max
-            j.b.init()
+        for b in self.segments[-1]:
+            b.v_1 = b.joint.v_max
 
-        self.plan(-1)
+        self.segments[-1].init().plan('R')  # Replan it as a ramp
 
-    def update(self, index):
-
-        idx = len(self.segments)-1
-        for _ in range(6):
-            print("Updating", idx)
-            u = self.update_boundary(idx)
-            if u > 0:
-                print("u plan")
-                self.plan(idx)
-
-            idx -= 1
-            u = self.update_boundary(idx)
-            if u == 0:
-                break;
-            else:
-                self.plan(idx)
-
-    def plan(self, index):
-        s = self.segments[index]
-
-        times = [j.b.t for j in s]
-
-        for i in range(4):
-            mt = max(times)
-
-            for j in s:
-                j.b.plan(mt)
-
-            times = [j.b.t for j in s]
-
-            if all ([t == times[0] for t in times]):
-                break
-        else:
-            raise ConvergenceError('Too many planning updates')
-
-
-    def update_boundary(self, index):
-
-        s = self.segments[index]
-        if not s.prior_seg:
-            return 0
-        else:
-            p = s.prior_seg
-
-        updates = 0
-        for b1, b2 in zip(p, s):
-            b1 = b1.b
-            b2 = b2.b
-
-            if  b1.v_1 != b2.v_0 or b1.v_1 != b1.v_c:
-                v = min(b1.v_1, b2.v_0)
-                v_m = (b1.v_c + b2.v_c) / 2
-
-                b1.v_1 = b1.v_c
-                b2.v_0 = b1.v_c
-
-                updates += 1
-
-            if updates > 0:
-                b1.init()
-                b2.init()
-
-        return updates
-
-
-    @property
-    def windows(self):
-        """Yield all windows of parameters"""
-        for i in range(len(self) - 1):
-            yield self.get_window(i)
-
-    @property
-    def segment_pairs(self):
-        """Yield all valid adjacent segment"""
-
-        for s in self.segments:
-            if s.next_seg is not None:
-                yield (s, s.next_seg)
-
-    @property
-    def joint_pairs(self):
-        """Yield all valid adjacent segment"""
-
-        for s in self.segments:
-            for j in s.joint_segments:
-                if j.next_js:
-                    yield (j, j.next_js)
-
-    def get_window(self, i: int):
-
-        prior = []
-        current = []
-        nxt = []
-
-        for js in self.segments[i]:
-            prior.append(js.prior_js.b if js.prior_js else None)
-            current.append(js.b)
-            nxt.append(js.next_js.b if js.next_js else None)
-
-        return prior, current, nxt
-
-    def _lim_segments(self, limit=4):
-        if limit:
-            return list(self.segments)[-limit:]
-        else:
-            return list(self.segments)
-
-    def err_t(self, limit=4):
-
-        l = self._lim_segments(limit)
-
-        et = sum([s.err_t for s in l]) / len(l)
-
-        if et is None:
-            return -1
-
-        return et
-
-    def err_x(self, limit=4):
-        l = self._lim_segments(limit)
-        return sum([js.subseg_error for s in l for js in s])
-
-    def count_needs_update(self):
-        return sum(s.needs_update for s in self.segments)
-
-    def validate(self, limit=3):
-        """Check that the c error in each of the segments is less than X%"""
-        for s in self:
-            for js in s:
-                if js.b.x != 0:
-                    rel_error = abs(js.err_x / js.b.x)
-                    if js.err_x > limit:
-                        raise ValidationError(f"{js.id} Excessive error. err_x={js.err_x} re={rel_error}")
 
     @property
     def dataframe(self):
-        from warnings import warn
 
         rows = []
-
-        try:
-            self.validate()
-        except ValidationError as e:
-            warn(str(e))
 
         for ss in self.subsegments:
             rows.append([None, *ss.row])
 
-        df = pd.DataFrame(rows, columns=' t seg axis x v_i v_f ss del_t v0m v1m'.split())
+        df = pd.DataFrame(rows, columns=' t seg axis x v_i v_f ss del_t'.split())
 
         df['t'] = df.groupby('axis').del_t.cumsum()
         df['calc_x'] = (df.v_i + df.v_f) / 2 * df.del_t
@@ -563,13 +880,13 @@ class SegmentList(object):
     def discontinuities(self):
         """Yield segment pairs with velocity discontinuities"""
         for c, n in self.joint_pairs:
-            if round(c.b.v_1, 2) != round(n.b.v_0, 2):
+            if round(c.v_1, 2) != round(n.v_0, 2):
                 yield c, n
 
     def has_discontinuity(self, s1, s2):
 
         for js1, js2 in zip(s1, s2):
-            if js1.b.v_1 != js2.b.v_0:
+            if js1.v_1 != js2.v_0:
                 return True
 
     @property
@@ -601,7 +918,7 @@ class SegmentList(object):
         """Return a joint segment by the id"""
         try:
             s, js = item
-            return self.segments[s].joint_segments[js]
+            return self.segments[s].blocks[js]
         except TypeError:
             return self.segments[item]
 
@@ -620,7 +937,7 @@ class SegmentList(object):
     def debug_str(self):
         return '\n'.join(s.debug_str() for s in self.segments)
 
-    def plot(self, ax=None, axis = None):
+    def plot(self, ax=None, axis=None):
         from .plot import plot_segment_list
 
         df = self.dataframe
@@ -631,4 +948,4 @@ class SegmentList(object):
         plot_segment_list(df, ax=ax)
 
 
-__all__ = ['SegmentList', 'Segment', 'Joint', 'JointSegment']
+__all__ = ['SegmentList', 'Segment', 'Block']
