@@ -113,12 +113,17 @@ def consistantize(b, return_error=False):
     b.x_d = (b.x_d)
     b.x_c = b.x - (b.x_a + b.x_d)
 
-    # b.v_0, b.v_c, b.v_1 = [round(e,4) for e in (b.v_0, b.v_c, b.v_1)]
-
     b.t_a = abs((b.v_c - b.v_0) / b.joint.a_max)
     b.t_d = abs((b.v_c - b.v_1) / b.joint.a_max)
 
-    b.t_c = b.x_c / b.v_c if b.v_c != 0 else 0
+    if round(b.x_c) == 0:  # get rid of small negatives
+        b.x_c = 0
+
+    if b.v_c != 0:
+        b.t_c = abs(b.x_c / b.v_c)
+        #assert b.t_c >= 0, (b.v_c, b.t_c, b.x_c)
+    else:
+        b.t_c = 0
 
     b.t = b.t_a + b.t_c + b.t_d
 
@@ -175,6 +180,7 @@ def set_bv(x, v_0, v_1, a_max):
     return (v_0, v_1)
 
 
+
 @dataclass
 class Joint:
     v_max: float
@@ -206,6 +212,8 @@ class Block:
     v_c: float = 0
     v_1: float = 0
     d: int = 0  # direction, -1 or 1
+
+    min_t: float = 0
 
     v_0_max = None
     v_1_max = None
@@ -241,11 +249,13 @@ class Block:
     @property
     def subsegments(self):
 
-        rd = round  # lambda v, n: v
+        rd = lambda v, n: round(v, n)
+        rds = lambda v, n: self.d * round(v, n)
+
         subsegs = (
-            (rd(self.t_a, 7), rd(self.v_0, 2), rd(self.v_c, 2), rd(self.x_a, 0), 'a'),
-            (rd(self.t_c, 7), rd(self.v_c, 2), rd(self.v_c, 2), rd(self.x_c, 0), 'c'),
-            (rd(self.t_d, 7), rd(self.v_c, 2), rd(self.v_1, 2), rd(self.x_d, 0), 'd')
+            (rd(self.t_a, 7), rds(self.v_0, 2), rds(self.v_c, 2), rds(self.x_a, 0), 'a'),
+            (rd(self.t_c, 7), rds(self.v_c, 2), rds(self.v_c, 2), rds(self.x_c, 0), 'c'),
+            (rd(self.t_d, 7), rds(self.v_c, 2), rds(self.v_1, 2), rds(self.x_d, 0), 'd')
         )
 
         return [SubSegment(self.id, self.segment.n, self.joint, self, *ss) for ss in subsegs]
@@ -296,7 +306,7 @@ class Block:
             self.v_c = self.v_0 = self.v_1 = 0
             self.flag = 'Z'
 
-        elif self.x < self.joint.small_x:
+        elif  self.x < self.joint.small_x:
             # The limit is the same one used for set_bv.
             # the equation here is the sympy solution to:
             # t_a = (v_c - v_0) / a
@@ -306,8 +316,11 @@ class Block:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
+            #self.v_0 = 0
+            #self.v_1 = 0
             self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-            self.v_c = min(self.v_c, v_max)  # formula errs for short segments
+            #self.v_c = min(self.v_c, v_max)  # formula errs for short segments
+
             self.flag = 'S'
         else:
             # If there is more area than the triangular profile for these boundary
@@ -334,6 +347,7 @@ class Block:
         """Calculate a ramp profile for a fixed time"""
 
         self.t = t
+        a_max = self.joint.a_max
 
         if self.x == 0 or self.t == 0:
             self.set_zero()
@@ -341,14 +355,22 @@ class Block:
             self.flag = 'Z'  # 5% of test cases
             return self
 
+        # Run the binary search anyway, just in case.
         def err(v_c):
             x_a, t_a = accel_xt(self.v_0, v_c, self.joint.a_max)
             t_c = self.t - t_a
+
             x_c = v_c * t_c
+            x_err = self.x - (x_a + x_c)
 
-            return self.x - (x_a + x_c)
+            return x_err
 
-        self.v_1 = self.v_c = binary_search(err, 0, self.x / self.t, self.joint.v_max)
+        try:
+            guess = a_max * t + self.v_0 - sqrt(a_max * (a_max * t ** 2 + 2 * t * self.v_0 - 2 * self.x))
+        except ValueError:
+            guess = self.x/self.t
+
+        self.v_1 = self.v_c = min(binary_search(err, 0, guess, self.joint.v_max), self.joint.v_max)
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
 
@@ -358,6 +380,88 @@ class Block:
 
         self.flag = "PR"
 
+        assert self.v_0 <= self.joint.v_max
+        assert self.v_c <= self.joint.v_max, self.v_c
+        assert self.v_1 <= self.joint.v_max
+
+        return self
+
+    def plan(self, t):
+
+        self.t = t
+
+        a_max = self.joint.a_max
+
+        if self.x == 0 or self.t == 0:
+            self.set_zero()
+            self.t_c = self.t = t
+            self.flag = 'Z'  # 5% of test cases
+            return self
+
+        # Find v_c with a binary search, then patch it up if the
+        # selection changes the segment time.
+        self.v_c = min(binary_search(make_area_error_func(self), 0,
+                                 self.x / self.t, self.joint.v_max), self.joint.v_max)
+        assert self.v_c <= self.joint.v_max
+        self.flag = 'O'
+
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+
+        # consistantize will make all of the values consistent with each other,
+        # and if anything is wrong, it will show up in a negative x_c
+
+        x_c = consistantize(self)
+
+        def psfrt(t, flag):  # plan, set flag and return
+            b = self.plan(t)
+            b.flag = 'NT'
+            return b
+
+        x_err = abs(round(self.area) - self.x)
+
+        if round(x_c) < 0 or (self.x > 25 and x_err > 1):
+            # We've probably got a really small move, and we've already tried
+            # reducing boundary velocities, so get more aggressive. If that
+            # doesn't work, allow the time to expand.
+
+            new_t = max(self.t_a + self.t_d, self.t)
+
+            if self.v_1 > 0:
+                self.v_1 = 0
+                return psfrt(t, 'V1Z')
+
+            elif self.v_0 > 0:
+                self.v_0 = 0
+                return psfrt(t, 'V0Z')
+
+            elif abs(new_t - self.t) > 0.0005:
+                print(round(new_t-self.t,4), new_t, self.t)
+                return psfrt(new_t, 'NT')
+            else:
+                raise ConvergenceError(
+                    'Unsolvable profile, incorrect area: '
+                    f'x_c={x_c} x_err={x_err} x={self.x}, x_ad={self.x_a + self.x_d} t={self.t} t_ad={self.t_a + self.t_d}')
+
+        if round(t, 3) != round(self.t, 3):
+            # This block is still too long.
+            if self.v_1 != 0:
+                self.v_1 = 0
+                return psfrt(t, 'HT1')
+            elif round(self.v_0) > 0:
+                self.v_0 = self.v_0 / 2
+                return psfrt(t, 'HT1')
+            else:
+                pass
+                # raise ConvergenceError(
+                #    'Unsolvable profile, wrong time: '
+                #    f't={self.t}, commanded t ={t} t_ad={self.t_a + self.t_d} v_c={self.v_c}')
+
+        assert round(self.x_a + self.x_d) <= self.x
+        #assert self.t_a + self.t_d <= self.t
+        assert self.v_c >= 0, (self.v_c, self.flag)
+        assert abs(self.area - self.x) < 2, (self.area, self)
+        assert self.t > 0
         assert self.v_0 <= self.joint.v_max
         assert self.v_c <= self.joint.v_max
         assert self.v_1 <= self.joint.v_max
@@ -371,101 +475,7 @@ class Block:
         self.t_a = self.t_d = self.t_c = 0
         self.v_0 = self.v_c = self.v_1 = 0
 
-    def plan(self, t):
-
-        self.t = t
-
-        a_max = self.joint.a_max
-        v_h = max(self.v_0, self.v_1)
-
-        if self.x == 0 or self.t == 0:
-            self.set_zero()
-            self.t_c = self.t = t
-            self.flag = 'Z'  # 5% of test cases
-            return self
-
-        elif self.v_0 == 0 and self.v_1 == 0:
-            # should always be the lower root
-            # Compare to equation 3.6 of Biagiotti
-            # Sympy:
-            # t_ad = v_c / a  # acel and decel are symmetric
-            # x_ad = a * t_ad ** 2 / 2
-            # x_c = x - 2 * x_ad
-            # t_c = t - 2 * t_ad
-            # solve(Eq(v_c, simplify(x_c / t_c)), v_c)
-            try:
-                self.v_c = a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * self.x)) / 2
-                self.flag = 'TZ1'  # .16% of test cases
-            except ValueError:
-                self.v_c = sqrt(self.x * a_max)
-                self.flag = 'TZ2'  # .16% of test cases
-
-            self.v_c = min(self.v_c, self.joint.v_max)
-
-        elif self.x >= v_h * self.t and self.v_0 == self.v_1:
-            # subtract off v_0, v_1 and the corresponding x and run again.
-            x_ = self.v_0 * self.t
-
-            # This is the same case as v_0 == v_1 == 0, but after subtracting off
-            # the area of the rectangular base, from v =0 to v=v_0. Then we add back in
-            # v_0.
-            self.v_c = self.v_0 + a_max * self.t / 2 - sqrt(a_max * (a_max * self.t ** 2 - 4 * (self.x - x_))) / 2
-            assert self.v_c <= self.joint.v_max
-            self.flag = 'T0'
-        else:
-
-            # Find v_c with a binary search, then patch it up if the
-            # selection changes the segment time.
-            self.v_c = binary_search(make_area_error_func(self), 0,
-                                     self.x / self.t, self.joint.v_max)
-            assert self.v_c <= self.joint.v_max
-            self.flag = 'O'
-
-        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
-        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
-
-        # consistantize will make all of the values consistent with each other,
-        # and if anthing is wrong, it will show up in a negative x_c
-
-        x_c = consistantize(self)
-
-        if x_c < 0 or (self.x > 25 and abs(round(self.area) - self.x)) > 1:
-            # We've probably got a really small move, and we've already tried
-            # reducing boundary velocities, so get more aggressive. If that
-            # doesn't work, allow the time to expand.
-
-            new_t = max(self.t_a + self.t_d, self.t)
-
-            if self.v_1 > 0:
-                self.v_1 = 0
-                b = self.plan(t)
-                b.flag = 'V1Z'
-                return b
-            elif self.v_0 > 0:
-                self.v_0 = 0
-                b = self.plan(t)
-                b.flag = 'V0Z'
-                return b
-            elif new_t != self.t:
-                b = self.plan(new_t)
-                b.flag = 'NT'
-                return b
-            else:
-                raise ConvergenceError(
-                    f'Unsolvable profile: x={self.x}, x_ad={self.x_a + self.x_d} t={self.t} t_ad={self.t_a + self.t_d}')
-
-        assert round(self.x_a + self.x_d) <= self.x
-        assert self.t_a + self.t_d <= self.t
-        assert self.v_c >= 0, (self.v_c, self.flag)
-        assert abs(self.area - self.x) < 2, (self.area, self)
-        assert self.t > 0
-        assert self.v_0 <= self.joint.v_max
-        assert self.v_c <= self.joint.v_max
-        assert self.v_1 <= self.joint.v_max
-
-        return self
-
-    def __str__(self):
+    def str(self):
         from colors import color, bold
 
         v0 = color(f"{int(self.v_0):<5d}", fg='green')
@@ -477,11 +487,9 @@ class Block:
 
         return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
 
-    def __repr__(self):
-        return self.__str__()
 
     def _repr_pretty_(self, p, cycle):
-        p.text(str(self) if not cycle else '...')
+        p.text(self.str() if not cycle else '...')
 
     @property
     def debug(self):
@@ -544,8 +552,13 @@ class Segment(object):
 
         return self
 
-    def plan(self, style='T'):
-        for i in range(4):
+    def plan(self, style='T', update_bv=False):
+
+        if update_bv:
+            self.update_1_boundary()
+            self.update_0_boundary()
+
+        for i in range(6):
             mt = max(self.times)
 
             for j in self:
@@ -557,7 +570,13 @@ class Segment(object):
             if self.times_e_rms < 0.001:
                 break
         else:
-            raise ConvergenceError(f'Too many planning updates. times={self.times}')
+            if self.times_e_rms < 0.003:
+                from warnings import warn
+                warn("Failed to converge sid={self.n} with err > 0.001, but < 0.003")
+            else:
+                raise ConvergenceError(
+                    f'Too many planning updates for sid={self.n}. times={self.times}, rms={self.times_e_rms}')
+                pass
 
     def update_0_boundary(self):
         if not self.prior:
@@ -565,7 +584,6 @@ class Segment(object):
 
         for p, c in zip(self.prior.blocks, self.blocks):
             c.v_0 = min(c.v_0, p.v_1)
-
 
     def update_1_boundary(self):
         """ Give this block v_1s that match the v_0 of the next block
@@ -577,8 +595,6 @@ class Segment(object):
 
         for c, n in zip(self.blocks, self.next.blocks):
             c.v_1 = min(c.v_1, n.v_0)
-
-
 
     @property
     def final_velocities(self):
@@ -627,9 +643,9 @@ class Segment(object):
         if not self.prior:
             return 0
 
-        for p,c in zip(self.prior.blocks, self.blocks):
+        for p, c in zip(self.prior.blocks, self.blocks):
 
-            v_c_m = (p.v_c+c.v_c)/2
+            v_c_m = (p.v_c + c.v_c) / 2
 
             if c.v_0 > v_c_m:
                 c.v_0 = v_c_m
@@ -637,8 +653,6 @@ class Segment(object):
                 fixes += 1
 
         return fixes
-
-
 
     @property
     def has_1_discontinuity(self):
@@ -656,7 +670,15 @@ class Segment(object):
     def times_e_rms(self):
         """Compute the RMS difference of the times from the mean time"""
         import numpy as np
-        times = self.times
+
+        # Ignore really small axis for this calculation, because
+        # they are very troublesome, and errors in them wont make a
+        # big difference
+        times = [round(b.t, 6) for b in self.blocks if b.x > 100]
+
+        if not times:
+            times = [0]
+
         s = sum(times)
         m = s / len(times)
         return np.sqrt(np.sum([(t - m) ** 2 for t in times]))
@@ -721,13 +743,13 @@ class Segment(object):
 
     def __str__(self):
 
-        return f"{self.t:>3.4f}|" + ' '.join(str(js) for js in self.blocks)
+        return f"{self.t:>3.4f}|" + ' '.join(js.str() for js in self.blocks)
 
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
 
     def plot(self, ax=None):
-        from .plot import  plot_params
+        from .plot import plot_params
         plot_params(self.blocks, ax=ax)
 
 
@@ -762,7 +784,9 @@ class SubSegment:
 
     @property
     def row(self):
-        return [self.segment_n, self.joint.n, self.x, self.v_i, self.v_f, self.ss, self.t]
+        return [self.segment_n, self.joint.n, self.x,
+                self.direction * self.v_i, self.direction * self.v_f,
+                self.ss, self.t]
 
 
 class SegmentList(object):
@@ -792,7 +816,7 @@ class SegmentList(object):
 
         return s
 
-    def rmove(self, x: List[int], update=True):
+    def rmove(self, x: List[int], update=True, planner=None):
         """Add a new segment, with joints expressing joint distance
         :type x: object
         """
@@ -806,8 +830,8 @@ class SegmentList(object):
             prior_velocities = []
 
             for p, c_x in zip(prior.blocks, x):
-                if not same_sign(p.x, c_x):
-                    prior_velocities.append(0) # changed direction, so must be 0
+                if not same_sign(p.d, sign(c_x)):
+                    prior_velocities.append(0)  # changed direction, so must be 0
                 else:
                     prior_velocities.append(p.v_1)
 
@@ -821,23 +845,27 @@ class SegmentList(object):
 
         self.segments.append(s)
 
-        s.init().plan()
+        s.init()
 
-        if s.has_0_discontinuity:
-            # We'd commanded the blocks in this segment to have the same v_0 as
-            # the prior blocks v_1 when this block was created, so if there is a
-            # boundary discontinuity, it's because a block in this segment can't be
-            # solved without reducing it's v_0. So we'll have to replan the prior block
-            assert s.prior is not None
-
-            s.prior.update_1_boundary()
-            s.prior.plan()
-
-        if s.fix_boundary_bumps():
-            s.prior.plan()
-            s.plan()
+        if planner:
+            planner(s)
+        else:
+            self.planr(s)
 
         return s
+
+    def planr(self, s):
+        """Replan recursively"""
+        if s is None:
+            return
+
+        s.plan()
+
+        if s.has_0_discontinuity:
+            s.prior.update_1_boundary()
+            self.planr(s.prior)
+            s.update_0_boundary()
+            s.plan()
 
     def uncap_tail(self):
         if len(self.segments) == 0:
@@ -846,8 +874,9 @@ class SegmentList(object):
         for b in self.segments[-1]:
             b.v_1 = b.joint.v_max
 
-        self.segments[-1].init().plan('R')  # Replan it as a ramp
-
+        mt = self.segments[-1].min_time
+        for b in self.segments[-1]:
+            b.init().plan_ramp(mt)  # Replan it as a ramp
 
     @property
     def dataframe(self):
@@ -864,17 +893,6 @@ class SegmentList(object):
         df['err'] = df.x - df.calc_x
 
         return df
-
-    @property
-    def total_error(self):
-        """Sum of the segment errors, from the dataframe"""
-        return self.dataframe.err.abs().sum()
-
-    @property
-    def total_re(self):
-        """Sum of the segment errors, from the dataframe, divided by total distance, of all axes"""
-        t = self.dataframe
-        return t.err.abs().sum() / t.x.sum()
 
     @property
     def discontinuities(self):
@@ -938,14 +956,12 @@ class SegmentList(object):
         return '\n'.join(s.debug_str() for s in self.segments)
 
     def plot(self, ax=None, axis=None):
-        from .plot import plot_segment_list
+        from .plot import plot_trajectory
 
         df = self.dataframe
 
         if axis is not None:
             df = df[df.axis == axis]
 
-        plot_segment_list(df, ax=ax)
+        plot_trajectory(df, ax=ax)
 
-
-__all__ = ['SegmentList', 'Segment', 'Block']

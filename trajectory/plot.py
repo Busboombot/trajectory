@@ -47,7 +47,7 @@ def plot_axis(df, axis, ax=None):
 
     return ax
 
-def plot_segment_list(df, ax=None):
+def plot_trajectory(df, ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(20, 3))
 
@@ -128,6 +128,6 @@ def plot_params(*args, ax=None):
         fig, ax = plt.subplots(1, 1, figsize=(20, 3))
 
     df = plot_params_df(*args)
-    plot_segment_list(df, ax=ax)
+    plot_trajectory(df, ax=ax)
 
     return ax
