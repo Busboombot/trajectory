@@ -35,7 +35,7 @@ from collections import deque
 from trajectory.sim import SimSegment
 
 from .params import *
-from .planner import Joint
+from .iplanner import Joint
 
 TIMEBASE = 1_000_000  # ticks per second
 

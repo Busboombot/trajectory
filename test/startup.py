@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import seaborn as sns
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from IPython.display import display, HTML, Markdown
 import pandas as pd

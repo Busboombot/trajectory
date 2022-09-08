@@ -1,11 +1,13 @@
+from collections import namedtuple
+from dataclasses import dataclass
 from itertools import count
 from math import sqrt
-from collections import namedtuple
 
 StepParams = namedtuple('StepParams', 'n tn  cn ca1 xn vn dir tf x')
 
-
 TIMEBASE = 1_000_000  # ticks per second
+DEFAULT_PERIOD = 4
+
 
 def sign(x):
     if x == 0:
@@ -15,62 +17,67 @@ def sign(x):
     else:
         return -1
 
+
+@dataclass
+class Step:
+    i: int
+    t: float
+    x: int
+    steps_left: int
+    v: float
+    delay_counter: float
+    delay: float
+
+
 class SimSegment(object):
     """A step segment for simulating the step interval algorithm. """
 
     fp_bits = 11  # Number of bits for the fixed point fraction
 
-    def __init__(self, v0, v1, x=None, t=None, t0=0, timebase=None):
+    row_header = 'n tn cn xn vn dir tf x'.split()
+
+    def __init__(self, x, v0, v1, direction=1, t0=0, timebase=None):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
         # Each segment must have a consistent, single-valued accceleration
         if abs(sign(v0) + sign(v1)) == 0 and (abs(v0) + abs(v1)) > 0:  # both signs are nonzero and opposite
             raise Exception("The velocity trajectory cannot cross zero. Got {}->{}".format(v0, v1))
 
-        assert t != 0.0
-
         self.dir = sign(v0 + v1)
         self.x = None
         self.v0 = abs(v0)
         self.v1 = abs(v1)  # Velocity at last step
-        self.t = None
+        self.direction = direction
 
-        if x is None:
-            self.x = int(round(.5 * (v1 + v0) * t, 0))
-            self.t = t
-
-        elif t is None:
-            self.x = abs(x)
-            if self.v1 + self.v0 == 0:
-                self.t = 0
-                self.a = 0
-            else:
-                self.t = abs(2. * float(self.x) / float(self.v1 + self.v0))
-                self.a = (self.v1 - self.v0) / self.t
-
-        self.x = int(round(self.x if self.x is not None else x, 0)) ;
-
-        if x == 0 or t == 0:
+        self.x = abs(x)
+        if self.v1 + self.v0 == 0:
+            self.t = 0
             self.a = 0
-            self.tf = 0  # time at last step
+        else:
+            self.t = abs(2. * float(self.x) / float(self.v1 + self.v0))
+            self.a = (self.v1 - self.v0) / self.t
+
+        self.x = int(round(self.x))
+        self.tf = 0  # time at last step
+
+        if x == 0:
+            self.a = 0
             self.tn = 0  # Total transit time for step n
             self.vn = 0  # running velocity
             self.xn = 0  # running position. Done when xn = x
             self.v1 = 0
             self.v0 = 0
         else:
-            self.tf = t  # time at last step
             self.tn = t0  # Total transit time for step n
             self.vn = abs(v0) * self.dir  # running velocity
             self.xn = 0  # running position. Done when xn = x
+            self.a = (v0 - v1) / self.t
 
         self.timebase = timebase if timebase is not None else TIMEBASE
 
         self.constV = False
 
-        self.sim_time = 0;  # Time to completion in simulation iteration/
-
-        assert self.t is not None
+        self.sim_time = 0  # Time to completion in simulation iteration/
 
     def initial_params(self):
         """Set initial parameters, which are a bit different for the first step,
@@ -122,69 +129,45 @@ class SimSegment(object):
         n = round(n)
         self.ca1 = 0
 
+
         return n, cn, ca
 
-    @staticmethod
-    def next_params(n, cn):
-
-        n += 1
-
-        ca1 = (2.0 * cn) / ((4.0 * n) + 1)
-
-        cn = cn - ca1  # Equation 13
-
-        return n, cn, ca1
-
-    @staticmethod
-    def next_params_xp(n, ca):
-        """Fixed point version of the next_params function"""
-
-        n += 1
-
-        if n != 0:
-            ca1 = (ca << 1) / ((n << 2) + 1);
-
-            ca = ca - ca1,  # Equation 13
-
-        return n, ca, ca1
-
-    def next_delay(self):
-        """Call this after each step to compute the delay to the next step"""
-
-        self.n, self.cn, self.ca1 = self.next_params(self.n, self.cn)
-
-        self.xn += 1
-        self.tn += abs(self.cn)
-        try:
-            self.vn = abs(TIMEBASE / self.cn) * self.dir
-        except ZeroDivisionError:
-            self.vn = 0
-
-        return self.n, self.cn, self.ca1
-
-    row_header = 'n tn cn xn vn dir tf x'.split()
-
-    def __iter__(self):
-
+    def iter_steps(self):
+        """Iterate per-step; each iteration is one step, with a variable
+        time delay between steps"""
         self.n, self.cn, self.ca = self.initial_params()
 
         while True:
             yield StepParams(self.n, round(self.tn / TIMEBASE, 6), round(self.cn, 2), round(self.ca1, 2), self.xn,
                              int(round(self.vn, 0)), self.dir, self.tf, self.x)
-            self.next_delay()
+
+            self.n += 1
+            self.cn = self.cn - ((2.0 * self.cn) / ((4.0 * self.n) + 1))  # Equation 13
+
+            self.xn += 1
+            self.tn += abs(self.cn)
+            try:
+                self.vn = abs(TIMEBASE / self.cn) * self.dir
+            except ZeroDivisionError:
+                self.vn = 0
+
             if self.x - self.xn <= 0:
                 break
 
-    def iter_discrete(self, period):
-        """Iterate discretely, in units of time of the period"""
+    def iter_period(self, period=DEFAULT_PERIOD, t0=0):
+        """Iterate per fixed time period. Some iterations will return steps, some will not.
+        Uses the Austin algorithm"""
 
         n, cn, ca = self.initial_params()
 
-        t = 0
         stepsLeft = self.x
         lastTime = 0
 
-        self.sim_time = 0
+        self.sim_time = t0
+
+        if ca == 0:
+            yield self.sim_time, 0
+            return
 
         for i in count():
 
@@ -194,21 +177,23 @@ class SimSegment(object):
 
             if lastTime > ca:
                 lastTime -= ca
-                if not self.constV:
-                    n += 1;
+                if not self.constV: # Only need to change delay is not constant velocity
+                    n += 1
                     ca1 = int(((2 * ca) / ((4 * n) + 1)))
                     ca = abs(ca - ca1)
 
                 stepsLeft -= 1;
-                yield 1
+                yield self.sim_time, self.direction
             else:
-                yield 0
+                yield self.sim_time, 0
 
             if stepsLeft == 0:
-                return i
+                yield self.sim_time, 0
+                return
 
-    def iter_time(self, period):
-
+    def iter_time(self, period=DEFAULT_PERIOD):
+        """Similar to iter_period, but does not use the Austin algorithm. Computes
+        velocity directly, and delay from velocity"""
         t = 0
         steps_left = self.x
 
@@ -224,12 +209,12 @@ class SimSegment(object):
                 delay_counter -= delay
 
                 steps_left -= 1
-                yield (i, round(t, 6) * self.timebase, steps_left, v, delay_counter, delay)
+                yield Step(i, round(t, 6), self.x, steps_left, v, delay_counter, delay)
 
             v = self.a * t + self.v0
             delay = 1 / v if v else 0
 
-            if steps_left == 0:
+            if steps_left <= 0:
                 break;
 
             delay_counter += delay_inc

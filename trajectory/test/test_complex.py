@@ -1,7 +1,7 @@
 import unittest
 
 from trajectory.segments import SegmentList, Segment, JointSegment
-from trajectory.planner import Joint
+from trajectory.iplanner import Joint
 import pandas as pd
 
 class TestComplex(unittest.TestCase):
