@@ -1,11 +1,9 @@
-#pragma once
 
 #include <vector>
 #include <limits.h>
 #include <cstdint> 
 #include <iostream>
 #include <iomanip>
-#include <initializer_list>
 
 
 /// A Move vector, which describes distances for all axes
@@ -23,7 +21,6 @@ using std::left;
 using std::right;
 using std::ostream;
 
-
 using MoveArray = std::vector<int32_t> ;
 
 struct Move {
@@ -37,14 +34,9 @@ struct Move {
     };
 
     uint32_t seq = 0; 
-
     MoveType move_type = MoveType::relative;
-
-    // Total Vector Time, in microseconds.
-    uint32_t t = 0; 
-
-    // Distances
-    MoveArray x;
+    uint32_t t = 0; // Total Vector Time, in microseconds. 
+    MoveArray x;// Distances
 
     Move(int n_joints):seq(0), move_type(MoveType::relative), t(0), x(){
         x.resize(n_joints);
@@ -56,12 +48,11 @@ struct Move {
 
     Move(uint32_t seq, uint32_t t, MoveType move_type, MoveArray x): seq(seq), move_type(move_type), t(t), x(x){}
 
-    Move(uint32_t seq, uint32_t t, MoveType move_type, std::initializer_list<int> il): 
+    Move(uint32_t seq, uint32_t t, MoveType move_type, std::initializer_list < int >  il): 
         seq(seq), move_type(move_type), t(t), x(MoveArray(il.begin(), il.end())){}
     
     Move(uint32_t t, std::initializer_list<int> il): Move(0, t, MoveType::relative, il){}
     
-
 private: 
     friend std::ostream &operator<<( ostream &output, const Move &p );
 };

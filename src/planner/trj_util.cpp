@@ -3,6 +3,8 @@
 #include <thread>
 #include <unistd.h>
 #include "trj_util.h"
+#include <iostream>
+
 
 bool same_sign(float a, float b){
     return (a == 0) or (b == 0) or (sgn(a) == sgn(b));
@@ -53,4 +55,9 @@ std::vector<std::string> splitString(const std::string& str){
     tokens.push_back(str.substr(prev));
  
     return tokens;
+}
+
+
+void hello(){
+    std::cout << "Hello from the trajectory planner" << std::endl;
 }

@@ -6,12 +6,14 @@
 #include <cstdint> 
 #include <math.h> 
 #include <chrono>
+#include <stdexcept>
 
 typedef std::chrono::milliseconds ms;
 typedef std::chrono::microseconds us;
 typedef std::chrono::steady_clock steadyClock;
 typedef std::chrono::duration<uint64_t, std::micro> duration;
 
+long micros();
 void start_usince();
 uint32_t usince();
 
@@ -36,9 +38,11 @@ template <typename T> int sgn(T val) {
 bool same_sign(float a, float b);
 
 // To convert class enums to ints. 
-template <typename E>
-constexpr typename std::underlying_type<E>::type to_underlying(E e) noexcept {
-    return static_cast<typename std::underlying_type<E>::type>(e);
-}
+//template <typename E>
+//constexpr typename std::underlying_type<E>::type to_underlying(E e) noexcept {
+//    return static_cast<typename std::underlying_type<E>::type>(e);
+//};
 
 std::vector<std::string> splitString(const std::string& str);
+
+void hello();

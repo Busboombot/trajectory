@@ -4,8 +4,11 @@ set (CMAKE_CXX_STANDARD 11)
 project (trajectory VERSION 0.0.1)
  
 add_subdirectory(planner) 
-include(CTest)
 
+
+include(CTest)
+find_package(Catch2 3 REQUIRED)
+include(Catch)
 
 # We check if this is the main file
 # you don't usually want users of your library to
@@ -15,10 +18,3 @@ if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 endif ()
 
 enable_testing()
-
-#add_executable(hello-cmake hello.cpp)
-
-target_include_directories(planner PUBLIC planner )
-target_compile_definitions(planner PUBLIC "TRJ_ENV_HOST")
-target_compile_definitions(planner PUBLIC INTERRUPT_DELAY=4)
-
