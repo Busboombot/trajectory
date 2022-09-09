@@ -33,13 +33,13 @@ Joint segment shapes
 
 """
 from collections import deque
-from dataclasses import dataclass
 from typing import List
+from warnings import warn
 
 import pandas as pd
-from warnings import warn
+
 from . import ConvergenceError
-from .gsolver import sign, Joint, ACDBlock
+from .gsolver import Joint, ACDBlock
 
 
 def index_clip(n, l):
@@ -65,7 +65,6 @@ class Segment(object):
 
         for b in self.blocks:
             b.segment = self
-
 
     def init(self):
         """Re-initialize all of the blocks"""
@@ -126,6 +125,10 @@ class Segment(object):
         return [round(js.t, 6) for js in self.blocks]
 
     @property
+    def time(self):
+        return max(self.times)
+
+    @property
     def times_e_rms(self):
         """Compute the RMS difference of the times from the mean time"""
         import numpy as np
@@ -142,7 +145,6 @@ class Segment(object):
         m = s / len(times)
         return np.sqrt(np.sum([(t - m) ** 2 for t in times]))
 
-
     def __iter__(self):
         return iter(self.blocks)
 
@@ -156,9 +158,26 @@ class Segment(object):
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
 
+    def stepper(self):
+        """Run steppers for all of the blocks in this segment"""
+        from .stepper import DEFAULT_PERIOD, TIMEBASE
+
+        steppers = [b.iter_steps(self.time, DEFAULT_PERIOD) for b in self.blocks]
+
+        t = 0
+        end_time = self.time
+        time_step = DEFAULT_PERIOD / TIMEBASE
+
+        for steps in zip(*steppers):
+            yield (round(t, 6),) + steps
+            t += time_step
+            if t > end_time:
+                break
+
     def plot(self, ax=None):
         from .plot import plot_params
         plot_params(self.blocks, ax=ax)
+
 
 class SegmentList(object):
     segments: List[Segment]
@@ -172,7 +191,7 @@ class SegmentList(object):
         for i, j in enumerate(self.joints):
             j.n = i
 
-        self.segments = []
+        self.segments = deque()
 
     def move(self, x: List[int], update=True, planner=None):
         """Add a new segment, with joints expressing joint distance
@@ -202,7 +221,7 @@ class SegmentList(object):
     def plan(self, s, prior, _recurse=True):
 
         if s.replans > 8:
-            raise ConvergenceError(f"Too many replans in sid={s.n} " )
+            raise ConvergenceError(f"Too many replans in sid={s.n} ")
 
         if prior:
 
@@ -301,6 +320,29 @@ class SegmentList(object):
 
     def debug_str(self):
         return '\n'.join(s.debug_str() for s in self.segments)
+
+    @property
+    def time(self):
+        return sum([s.time for s in self.segments])
+
+    def stepper(self):
+        """Step through **and consume** the segments, producing steps. The SegmentList
+        will be empty when this generator completes. """
+
+        from .stepper import DEFAULT_PERIOD, TIMEBASE
+
+        while len(self.segments) > 0:
+            steppers = [b.iter_steps(self.time, DEFAULT_PERIOD) for b in self.segments[0].blocks]
+            t = 0
+            end_time = self.segments[0].time
+            time_step = DEFAULT_PERIOD / TIMEBASE
+            for steps in zip(*steppers):
+                yield (round(t, 6),) + steps
+                t += time_step
+                if t > end_time:
+                    break
+
+            self.segments.pop()
 
     def plot(self, ax=None, axis=None):
         from .plot import plot_trajectory

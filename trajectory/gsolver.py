@@ -4,6 +4,8 @@ from math import sqrt
 import pandas as pd
 
 from .exceptions import TrapMathError, ConvergenceError
+from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
+
 
 def binary_search(f, v_min, v_guess, v_max):
     for i in range(20):
@@ -45,6 +47,7 @@ def set_bv(x, v_0, v_1, a_max):
 
     return (v_0, v_1)
 
+
 def accel_xt(v_i, v_f, a):
     """Distance and time required to accelerate from v0 to v1 at acceleration a"""
 
@@ -70,40 +73,6 @@ def accel_acd(v_0, v_c, v_1, a):
     return x_ad, t_ad
 
 
-def consistantize(b, return_error=False):
-    """Recalculate t to make x and v values integers, and everything more consistent
-     This operation will maintain the original value for x, but may change t"""
-
-    b.x_a = b.x_a
-    b.x_d = b.x_d
-    b.x_c = b.x - (b.x_a + b.x_d)
-
-    b.t_a = abs((b.v_c - b.v_0) / b.joint.a_max)
-    b.t_d = abs((b.v_c - b.v_1) / b.joint.a_max)
-
-    if round(b.x_c) == 0:  # get rid of small negatives
-        b.x_c = 0
-
-    if b.v_c != 0:
-        b.t_c = abs(b.x_c / b.v_c)
-        #assert b.t_c >= 0, (b.v_c, b.t_c, b.x_c)
-    else:
-        b.t_c = 0
-
-    b.t = b.t_a + b.t_c + b.t_d
-
-    # Check error against area calculation
-    if return_error:
-        x_ad, t_ad = accel_acd(b.v_0, b.v_c, b.v_1, b.joint.a_max)
-        t_c = round(b.t - t_ad, 8)  # Avoid very small negatives
-        x_c = b.v_c * t_c
-        x = x_ad + x_c
-        x_e = x - b.x
-        return b.x_c, x_e
-    else:
-        return b.x_c
-
-
 def sign(x):
     if x == 0:
         return 0
@@ -112,20 +81,22 @@ def sign(x):
     else:
         return -1
 
+
 def same_sign(a, b):
     return int(a) == 0 or int(b) == 0 or sign(a) == sign(b)
+
 
 @dataclass
 class Joint:
     v_max: float
     a_max: float
     # distances below the small x limit will never hit v_max before needing to decelerate
-    small_x: float = None # min distance for v_max->0->v_max
-    max_discontinuity: float = None # Max velocity difference between adjacent blocks
+    small_x: float = None  # min distance for v_max->0->v_max
+    max_discontinuity: float = None  # Max velocity difference between adjacent blocks
 
     def __post_init__(self):
-        self.small_x = (self.v_max ** 2) / (2*self.a_max)
-        self.max_discontinuity = self.a_max/self.v_max # Max vel change in 1 step
+        self.small_x = (self.v_max ** 2) / (2 * self.a_max)
+        self.max_discontinuity = self.a_max / self.v_max  # Max vel change in 1 step
 
     def new_block(self, x, v_0=None, v_1=None):
         v_0 = v_0 if v_0 is not None else self.v_max
@@ -138,12 +109,15 @@ class Joint:
 class ACDBlock:
     x: float = 0
     t: float = 0
+
     t_a: float = 0
     t_c: float = 0
     t_d: float = 0
+
     x_a: float = 0
     x_c: float = 0
     x_d: float = 0
+
     v_0: float = 0
     v_c: float = 0
     v_1: float = 0
@@ -156,6 +130,8 @@ class ACDBlock:
 
     flag: "str" = None
     recalcs: int = 0
+
+    step_period: int = DEFAULT_PERIOD
 
     _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
                     'v_1',
@@ -170,7 +146,7 @@ class ACDBlock:
         self.x = abs(self.x)
 
     def init(self):
-
+        """Find a minimum time profile for the block"""
         a_max = self.joint.a_max
         v_max = self.joint.v_max
 
@@ -184,7 +160,7 @@ class ACDBlock:
             self.v_c = self.v_0 = self.v_1 = 0
             self.flag = 'Z'
 
-        elif self.x < 2*self.joint.small_x:
+        elif self.x < 2 * self.joint.small_x:
             # The limit is the same one used for set_bv.
             # the equation here is the sympy solution to:
             # t_a = (v_c - v_0) / a
@@ -194,10 +170,10 @@ class ACDBlock:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
-            #self.v_0 = 0
-            #self.v_1 = 0
+            # self.v_0 = 0
+            # self.v_1 = 0
             self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-            #self.v_c = min(self.v_c, v_max)  # formula errs for short segments
+            # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
 
             self.flag = 'S'
         else:
@@ -248,7 +224,7 @@ class ACDBlock:
             guess = a_max * t + self.v_0 - sqrt(a_max * (a_max * t ** 2 + 2 * t * self.v_0 - 2 * self.x))
             guess_flag = 'c'
         except ValueError:
-            guess = min(self.x/self.t, self.joint.v_max)
+            guess = min(self.x / self.t, self.joint.v_max)
             guess_flag = 'm'
 
         try:
@@ -260,7 +236,7 @@ class ACDBlock:
 
         self.t_d, self.x_d = 0, 0
 
-        consistantize(self)
+        self.consistantize()
 
         self.flag = "PR"
 
@@ -289,7 +265,8 @@ class ACDBlock:
             return self.x - self.replace(v_c=v_c).arear
 
         self.v_c = min(binary_search(err, 0,
-                                 self.x / self.t, self.joint.v_max), self.joint.v_max)
+                                     self.x / self.t, self.joint.v_max), self.joint.v_max)
+
         assert self.v_c <= self.joint.v_max
         self.flag = 'O'
 
@@ -299,7 +276,7 @@ class ACDBlock:
         # consistantize will make all of the values consistent with each other,
         # and if anything is wrong, it will show up in a negative x_c
 
-        x_c = consistantize(self)
+        x_c = self.consistantize()
 
         def psfrt(t, flag):  # plan, set flag and return
             b = self.plan(t)
@@ -346,7 +323,7 @@ class ACDBlock:
                 #    f't={self.t}, commanded t ={t} t_ad={self.t_a + self.t_d} v_c={self.v_c}')
 
         assert round(self.x_a + self.x_d) <= self.x
-        #assert self.t_a + self.t_d <= self.t
+        # assert self.t_a + self.t_d <= self.t
         assert self.v_c >= 0, (self.v_c, self.flag)
         assert abs(self.area - self.x) < 2, (self.area, self)
         assert self.t > 0
@@ -355,6 +332,39 @@ class ACDBlock:
         assert self.v_1 <= self.joint.v_max
 
         return self
+
+    def consistantize(self, return_error=False):
+        """Recalculate t to make x and v values integers, and everything more consistent
+         This operation will maintain the original value for x, but may change t"""
+
+        self.x_a = self.x_a
+        self.x_d = self.x_d
+        self.x_c = self.x - (self.x_a + self.x_d)
+
+        self.t_a = abs((self.v_c - self.v_0) / self.joint.a_max)
+        self.t_d = abs((self.v_c - self.v_1) / self.joint.a_max)
+
+        if round(self.x_c) == 0:  # get rid of small negatives
+            self.x_c = 0
+
+        if self.v_c != 0:
+            self.t_c = abs(self.x_c / self.v_c)
+            # assert b.t_c >= 0, (b.v_c, b.t_c, b.x_c)
+        else:
+            self.t_c = 0
+
+        self.t = self.t_a + self.t_c + self.t_d
+
+        # Check error against area calculation
+        if return_error:
+            x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
+            t_c = round(self.t - t_ad, 8)  # Avoid very small negatives
+            x_c = self.v_c * t_c
+            x = x_ad + x_c
+            x_e = x - self.x
+            return self.x_c, x_e
+        else:
+            return self.x_c
 
     def set_bv(self, v_0=None, v_1=None):
 
@@ -412,12 +422,12 @@ class ACDBlock:
 
         rows = []
         d = self.d
-        rows.append({'t':None, 'seg':0, 'axis':0,
-             'x':d*self.x_a, 'v_i':d*self.v_0, 'v_f':d*self.v_c, 'del_t':self.t_a})
         rows.append({'t': None, 'seg': 0, 'axis': 0,
-                     'x':d* self.x_c, 'v_i': d*self.v_c, 'v_f': d*self.v_c, 'del_t': self.t_c})
+                     'x': d * self.x_a, 'v_i': d * self.v_0, 'v_f': d * self.v_c, 'del_t': self.t_a})
         rows.append({'t': None, 'seg': 0, 'axis': 0,
-                     'x': d*self.x_d, 'v_i': d*self.v_c, 'v_f': d*self.v_1, 'del_t': self.t_d})
+                     'x': d * self.x_c, 'v_i': d * self.v_c, 'v_f': d * self.v_c, 'del_t': self.t_c})
+        rows.append({'t': None, 'seg': 0, 'axis': 0,
+                     'x': d * self.x_d, 'v_i': d * self.v_c, 'v_f': d * self.v_1, 'del_t': self.t_d})
 
         return pd.DataFrame(rows)
 
@@ -425,22 +435,41 @@ class ACDBlock:
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-    @property
-    def sim(self):
-        from .sim import SimSegment
+    def steppers(self, period=None):
+
+        if period is None:
+            period = self.step_period
+
         return [
-            SimSegment(self.x_a, self.v_0, self.v_c, self.d),
-            SimSegment(self.x_c, self.v_c, self.v_c, self.d),
-            SimSegment(self.x_d, self.v_c, self.v_1, self.d),
+            Stepper(self.x_a, self.v_0, self.v_c, self.d, period),
+            Stepper(self.x_c, self.v_c, self.v_c, self.d, period),
+            Stepper(self.x_d, self.v_c, self.v_1, self.d, period),
         ]
 
-    def iter_steps(self, t0=0):
-        for s in self.sim:
-            for t, step in s.iter_period(t0=t0):
-                t0 = t
-                yield t,step
+    def iter_steps(self, until_t=None, period=None):
 
+        if period is None:
+            period = self.step_period
 
+        if until_t is None:
+            until_t = int(self.segment.time * period * TIMEBASE)
+        else:
+            until_t *= int( period * TIMEBASE)
+
+        t = 0
+        for s in self.steppers(period):
+
+            while not s.done:
+                yield next(s)
+                t += period
+                if t >= until_t:
+                    return
+
+        while True:
+            yield 0
+            t += period
+            if t >= until_t:
+                return
 
     def str(self):
         from colors import color, bold
@@ -456,4 +485,3 @@ class ACDBlock:
 
     def _repr_pretty_(self, p, cycle):
         p.text(self.str() if not cycle else '...')
-

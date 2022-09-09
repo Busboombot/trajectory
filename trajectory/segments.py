@@ -600,21 +600,7 @@ class SegmentList(object):
 
         return next_seg
 
-    def validate(self):
-        for s in self.segments:
-            s.validate()
 
-    @property
-    def sub_segments(self):
-        """Generate all of the subsegments from each of the segments"""
-
-        # _sub_segments are the "finished" segments. All the segments before the
-        # second to last, which won't affect anything.
-        for ss in self._sub_segments:
-            yield ss
-
-        for s in self.segments:
-            yield from s.sub_segments
 
     @property
     def dataframe(self):
