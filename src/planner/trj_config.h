@@ -1,8 +1,9 @@
 #pragma once
 
-#include <Arduino.h>
 #include <limits.h>
-#include "trj_const.h"
+#include <stdint.h>
+
+#define INTERRUPT_DELAY 4 // interrupts every 4 microseconds
 
 // Configuration record for one axis
 // 8 Bytes

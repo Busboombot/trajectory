@@ -5,6 +5,7 @@
 #include <iostream>
 #include <vector>
 #include <assert.h>
+#include <sstream>
 
 #include "trj_planner.h"
 #include "trj_segment.h"
@@ -39,8 +40,7 @@ void Planner::setJoint(Joint &joint){
     }
 }
 
-#include <sstream>
-#include "trj_debug.h"
+
 
 void Planner::push(const Move& move){ // push to tail
 

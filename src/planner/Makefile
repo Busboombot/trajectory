@@ -57,10 +57,10 @@ RM = /usr/local/Cellar/cmake/3.24.1/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/eric/Documents/proj/trajectory/src/planner
+CMAKE_SOURCE_DIR = /Users/eric/Documents/proj/trajectory/src
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/eric/Documents/proj/trajectory/src/planner
+CMAKE_BINARY_DIR = /Users/eric/Documents/proj/trajectory/src
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,14 +87,14 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/eric/Documents/proj/trajectory/src/planner/CMakeFiles /Users/eric/Documents/proj/trajectory/src/planner//CMakeFiles/progress.marks
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/eric/Documents/proj/trajectory/src/planner/CMakeFiles 0
+	cd /Users/eric/Documents/proj/trajectory/src && $(CMAKE_COMMAND) -E cmake_progress_start /Users/eric/Documents/proj/trajectory/src/CMakeFiles /Users/eric/Documents/proj/trajectory/src/planner//CMakeFiles/progress.marks
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/eric/Documents/proj/trajectory/src/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 clean
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner/clean
 .PHONY : clean
 
 # The main clean target
@@ -103,30 +103,31 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 preinstall
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 preinstall
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	$(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /Users/eric/Documents/proj/trajectory/src && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
-#=============================================================================
-# Target rules for targets named planner
+# Convenience name for target.
+planner/CMakeFiles/planner.dir/rule:
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner/CMakeFiles/planner.dir/rule
+.PHONY : planner/CMakeFiles/planner.dir/rule
 
-# Build rule for target.
-planner: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 planner
+# Convenience name for target.
+planner: planner/CMakeFiles/planner.dir/rule
 .PHONY : planner
 
 # fast build rule for target.
 planner/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/build
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/build
 .PHONY : planner/fast
 
 trj_jointss.o: trj_jointss.cpp.o
@@ -134,7 +135,7 @@ trj_jointss.o: trj_jointss.cpp.o
 
 # target to build an object file
 trj_jointss.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_jointss.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_jointss.cpp.o
 .PHONY : trj_jointss.cpp.o
 
 trj_jointss.i: trj_jointss.cpp.i
@@ -142,7 +143,7 @@ trj_jointss.i: trj_jointss.cpp.i
 
 # target to preprocess a source file
 trj_jointss.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_jointss.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_jointss.cpp.i
 .PHONY : trj_jointss.cpp.i
 
 trj_jointss.s: trj_jointss.cpp.s
@@ -150,7 +151,7 @@ trj_jointss.s: trj_jointss.cpp.s
 
 # target to generate assembly for a file
 trj_jointss.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_jointss.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_jointss.cpp.s
 .PHONY : trj_jointss.cpp.s
 
 trj_move.o: trj_move.cpp.o
@@ -158,7 +159,7 @@ trj_move.o: trj_move.cpp.o
 
 # target to build an object file
 trj_move.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_move.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_move.cpp.o
 .PHONY : trj_move.cpp.o
 
 trj_move.i: trj_move.cpp.i
@@ -166,7 +167,7 @@ trj_move.i: trj_move.cpp.i
 
 # target to preprocess a source file
 trj_move.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_move.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_move.cpp.i
 .PHONY : trj_move.cpp.i
 
 trj_move.s: trj_move.cpp.s
@@ -174,7 +175,7 @@ trj_move.s: trj_move.cpp.s
 
 # target to generate assembly for a file
 trj_move.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_move.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_move.cpp.s
 .PHONY : trj_move.cpp.s
 
 trj_planner.o: trj_planner.cpp.o
@@ -182,7 +183,7 @@ trj_planner.o: trj_planner.cpp.o
 
 # target to build an object file
 trj_planner.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_planner.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_planner.cpp.o
 .PHONY : trj_planner.cpp.o
 
 trj_planner.i: trj_planner.cpp.i
@@ -190,7 +191,7 @@ trj_planner.i: trj_planner.cpp.i
 
 # target to preprocess a source file
 trj_planner.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_planner.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_planner.cpp.i
 .PHONY : trj_planner.cpp.i
 
 trj_planner.s: trj_planner.cpp.s
@@ -198,7 +199,7 @@ trj_planner.s: trj_planner.cpp.s
 
 # target to generate assembly for a file
 trj_planner.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_planner.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_planner.cpp.s
 .PHONY : trj_planner.cpp.s
 
 trj_segment.o: trj_segment.cpp.o
@@ -206,7 +207,7 @@ trj_segment.o: trj_segment.cpp.o
 
 # target to build an object file
 trj_segment.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_segment.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_segment.cpp.o
 .PHONY : trj_segment.cpp.o
 
 trj_segment.i: trj_segment.cpp.i
@@ -214,7 +215,7 @@ trj_segment.i: trj_segment.cpp.i
 
 # target to preprocess a source file
 trj_segment.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_segment.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_segment.cpp.i
 .PHONY : trj_segment.cpp.i
 
 trj_segment.s: trj_segment.cpp.s
@@ -222,7 +223,7 @@ trj_segment.s: trj_segment.cpp.s
 
 # target to generate assembly for a file
 trj_segment.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_segment.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_segment.cpp.s
 .PHONY : trj_segment.cpp.s
 
 trj_stepdriver.o: trj_stepdriver.cpp.o
@@ -230,7 +231,7 @@ trj_stepdriver.o: trj_stepdriver.cpp.o
 
 # target to build an object file
 trj_stepdriver.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_stepdriver.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_stepdriver.cpp.o
 .PHONY : trj_stepdriver.cpp.o
 
 trj_stepdriver.i: trj_stepdriver.cpp.i
@@ -238,7 +239,7 @@ trj_stepdriver.i: trj_stepdriver.cpp.i
 
 # target to preprocess a source file
 trj_stepdriver.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_stepdriver.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_stepdriver.cpp.i
 .PHONY : trj_stepdriver.cpp.i
 
 trj_stepdriver.s: trj_stepdriver.cpp.s
@@ -246,7 +247,7 @@ trj_stepdriver.s: trj_stepdriver.cpp.s
 
 # target to generate assembly for a file
 trj_stepdriver.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_stepdriver.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_stepdriver.cpp.s
 .PHONY : trj_stepdriver.cpp.s
 
 trj_util.o: trj_util.cpp.o
@@ -254,7 +255,7 @@ trj_util.o: trj_util.cpp.o
 
 # target to build an object file
 trj_util.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_util.cpp.o
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_util.cpp.o
 .PHONY : trj_util.cpp.o
 
 trj_util.i: trj_util.cpp.i
@@ -262,7 +263,7 @@ trj_util.i: trj_util.cpp.i
 
 # target to preprocess a source file
 trj_util.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_util.cpp.i
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_util.cpp.i
 .PHONY : trj_util.cpp.i
 
 trj_util.s: trj_util.cpp.s
@@ -270,7 +271,7 @@ trj_util.s: trj_util.cpp.s
 
 # target to generate assembly for a file
 trj_util.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/planner.dir/build.make CMakeFiles/planner.dir/trj_util.cpp.s
+	cd /Users/eric/Documents/proj/trajectory/src && $(MAKE) $(MAKESILENT) -f planner/CMakeFiles/planner.dir/build.make planner/CMakeFiles/planner.dir/trj_util.cpp.s
 .PHONY : trj_util.cpp.s
 
 # Help Target
@@ -311,6 +312,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	$(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /Users/eric/Documents/proj/trajectory/src && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

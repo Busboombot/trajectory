@@ -5,6 +5,8 @@
 #include <cstdint> 
 #include <iostream>
 #include <iomanip>
+#include <initializer_list>
+
 
 /// A Move vector, which describes distances for all axes
 /**
@@ -20,6 +22,7 @@ using std::setw;
 using std::left;
 using std::right;
 using std::ostream;
+
 
 using MoveArray = std::vector<int32_t> ;
 

@@ -2,7 +2,6 @@
 #include <chrono>
 #include <thread>
 #include <unistd.h>
-#include "Arduino.h"
 #include "trj_util.h"
 
 bool same_sign(float a, float b){
