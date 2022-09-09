@@ -31,9 +31,12 @@ class Stepper(object):
     def __init__(self, x, vi, vf, direction=1, period=DEFAULT_PERIOD):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
+        vi = abs(vi)
+        vf = abs(vf)
+
         self.x = x
+        self.direction = sign(x)
         self.vi = vi
-        self.direction = direction
         self.steps_left = x
         self.t = 0
         self.delay = 0
