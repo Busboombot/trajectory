@@ -13,6 +13,8 @@ find_package(Boost 1.79.0 REQUIRED COMPONENTS
         filesystem system python310 )
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+FIND_PACKAGE(PythonInterp 3)
+FIND_PACKAGE(PythonLibs 3 REQUIRED)
 
 if(NOT Boost_FOUND)
     message(FATAL_ERROR "Could not find boost!")
