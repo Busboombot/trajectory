@@ -125,10 +125,7 @@ class ACDBlock:
 
     joint: Joint = None
     segment: 'Segment' = None
-    next: 'ACDBlock' = None
-    prior: 'ACDBlock' = None
 
-    flag: "str" = None
     recalcs: int = 0
 
     step_period: int = DEFAULT_PERIOD
@@ -158,7 +155,7 @@ class ACDBlock:
 
         if self.x == 0:
             self.v_c = self.v_0 = self.v_1 = 0
-            self.flag = 'Z'
+
 
         elif self.x < 2 * self.joint.small_x:
             # The limit is the same one used for set_bv.
@@ -175,14 +172,13 @@ class ACDBlock:
             self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
             # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
 
-            self.flag = 'S'
+
         else:
             # If there is more area than the triangular profile for these boundary
             # velocities, the v_c must be v_max. In this case, it must also be true that:
             #    x_ad, t_ad = accel_acd(self.v_0, v_max, self.v_1, a_max)
             #    assert self.x > x_ad
             self.v_c = v_max
-            self.flag = 'M'
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
         self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
@@ -193,7 +189,7 @@ class ACDBlock:
         self.t_c = self.x_c / self.v_c if self.v_c != 0 else 0
         self.t = self.t_a + self.t_c + self.t_d
 
-        assert round(self.x_c) >= 0, (self.x_c, self.v_c, self.flag, self)
+        assert round(self.x_c) >= 0, (self.x_c, self.v_c, self)
         assert abs(self.area - self.x) < 1, (self.x, self.area, self.t, self.v_0, self.v_1)
 
         return self
@@ -207,7 +203,6 @@ class ACDBlock:
         if self.x == 0 or self.t == 0:
             self.set_zero()
             self.t_c = self.t = t
-            self.flag = 'Z'  # 5% of test cases
             return self
 
         # Run the binary search anyway, just in case.
@@ -238,7 +233,6 @@ class ACDBlock:
 
         self.consistantize()
 
-        self.flag = "PR"
 
         assert self.v_0 <= self.joint.v_max
         assert self.v_c <= self.joint.v_max, self.v_c
@@ -255,7 +249,6 @@ class ACDBlock:
         if self.x == 0 or self.t == 0:
             self.set_zero()
             self.t_c = self.t = t
-            self.flag = 'Z'  # 5% of test cases
             return self
 
         # Find v_c with a binary search, then patch it up if the
@@ -268,7 +261,6 @@ class ACDBlock:
                                      self.x / self.t, self.joint.v_max), self.joint.v_max)
 
         assert self.v_c <= self.joint.v_max
-        self.flag = 'O'
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
         self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
@@ -324,7 +316,7 @@ class ACDBlock:
 
         assert round(self.x_a + self.x_d) <= self.x
         # assert self.t_a + self.t_d <= self.t
-        assert self.v_c >= 0, (self.v_c, self.flag)
+        assert self.v_c >= 0, self.v_c
         assert abs(self.area - self.x) < 2, (self.area, self)
         assert self.t > 0
         assert self.v_0 <= self.joint.v_max
@@ -412,7 +404,7 @@ class ACDBlock:
 
     def set_zero(self):
 
-        self.flag = ''  # 5% of test cases
+
         self.x_a = self.x_d = self.x_c = 0
         self.t_a = self.t_d = self.t_c = 0
         self.v_0 = self.v_c = self.v_1 = 0

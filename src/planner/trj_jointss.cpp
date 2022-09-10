@@ -5,16 +5,17 @@
 #include <array>
 #include <iostream>
 #include <iomanip>
-#include <math.h> // rint,  abs
+#include <cmath> // rint,  abs
 #include <algorithm>    // std::min
 #include <functional>
 
-#include <assert.h>
+#include <cassert>
 
 #include "trj_jointss.h"
 #include "trj_util.h"
 #include "trj_segment.h"
 #include "trj_planner_const.h"
+#include "trj_joint.h"
 
 using namespace std;
 
@@ -62,20 +63,20 @@ void JointSegment::update_end_velocity_limit(bool is_last){
 
 
 // How to calc the velocity: mean or v_c?
-#define V v_c
 
-void JointSegment::update_boundary_velocity(JointSegment *prior_js, JointSegment* next_js){
+
+void JointSegment::update_boundary_velocity(JointSegment *prior_js_, JointSegment* next_js_){
 
     
     
-    if (prior_js != NULL){
-        float mean_bv = (prior_js->V + V) / 2.;
+    if (prior_js_ != nullptr){
+        float mean_bv = (prior_js_->v_c + v_c) / 2.;
         v_0 =  std::min(mean_bv, v_0_max);
-        v_0 =  std::min(v_0, prior_js->v_1_max);
-    } else if (next_js != NULL) {
-        float mean_bv = (V + next_js->V) / 2.;
+        v_0 =  std::min(v_0, prior_js_->v_1_max);
+    } else if (next_js_ != nullptr) {
+        float mean_bv = (v_c + next_js_->v_c) / 2.;
         v_1 = std::min(mean_bv, v_1_max);
-        v_1 = std::min(v_1, next_js->v_0_max);
+        v_1 = std::min(v_1, next_js_->v_0_max);
     }
     
     
@@ -92,7 +93,7 @@ void JointSegment::update_boundary_velocity(JointSegment *prior_js, JointSegment
  * @param v_max max v_c value. 
  * @return float 
  */
-float binary_search(std::function<float(float)> f, float v_min, float v_guess, float v_max){
+float binary_search(const std::function<float(float)>& f, float v_min, float v_guess, float v_max){
 
     float old_guess;
 
@@ -102,12 +103,12 @@ float binary_search(std::function<float(float)> f, float v_min, float v_guess, f
        
         if (roundf(x) > 0){
             old_guess = v_guess;
-            v_guess = (v_max + v_guess) / 2.;
+            v_guess = (v_max + v_guess) / 2.0f;
             v_min = old_guess;
 
         } else if (roundf(x) < 0){
             old_guess = v_guess;
-            v_guess = (v_min + v_guess) / 2.;
+            v_guess = (v_min + v_guess) / 2.0f;
             v_max = old_guess;
 
         } else {
@@ -122,9 +123,9 @@ float binary_search(std::function<float(float)> f, float v_min, float v_guess, f
 }
 
 float JointSegment::update_sub_segments(){
-    x_a = (v_0 + v_c) * segment->t_a / 2. ; 
+    x_a = (v_0 + v_c) * segment->t_a / 2.0f ;
     x_c = segment->t_c * v_c + x_err;
-    x_d = (v_1 + v_c) * segment->t_d / 2. ;
+    x_d = (v_1 + v_c) * segment->t_d / 2.0f ;
     
     assert(!isnan(x_a));
     assert(!isnan(x_c));
@@ -148,10 +149,10 @@ float JointSegment::search_v_c(){
         // This closure function returns the error between the area of the trapezoid
         // with a given v_c and the required distance x. The binary serarch 
         
-        auto f = [this](float v_c){   
+        auto f = [this](float v_c_){
             
-            float x_t = (v_0 + v_c) * segment->t_a / 2. +
-                        (v_1 + v_c) * segment->t_d / 2. +
+            float x_t = (v_0 + v_c) * segment->t_a / 2.0f +
+                        (v_1 + v_c) * segment->t_d / 2.0f +
                         segment->t_c * v_c;
 
             return x -  x_t;
@@ -169,15 +170,15 @@ float accel_t_for_x(float x, float v_0, float a_max){
 
     float a,b,c, term_1, term_2, root_1, root_2;
 
-    a = .5 * a_max;
+    a = .5f * a_max;
     b = v_0;
     c = -x;
 
     term_1 = -b;
-    term_2 = sqrt((b*b) - 4 * a * c);
+    term_2 = sqrt((b*b) - 4.0f * a * c);
 
-    root_1 = (term_1 - term_2) / (2 * a);
-    root_2 = (term_1 + term_2) / (2 * a);
+    root_1 = (term_1 - term_2) / (2.0f * a);
+    root_2 = (term_1 + term_2) / (2.0f * a);
 
     return std::max(root_1, root_2);
 }
@@ -197,22 +198,23 @@ void JointSegment::update_t_min(){
         // Time to accelerate to max speed from initial speed
         float t_a = (fabs(v_c - v_0)) / joint.a_max;
         // Time to decel from max speed to final speed.
-        float t_d = (fabs(v_c - v_1)) / joint.d_max;
+        float t_d = (fabs(v_c - v_1)) / joint.a_max;
        
         // Distances for the accel and decel phases
-        float x_a = int(round((v_0 + v_c) * t_a / 2.));
-        float x_d = int(round((v_1 + v_c) * t_d / 2.));
+        float x_a_ = int(round((v_0 + v_c) * t_a / 2.));
+        float d_x_ = int(round((v_1 + v_c) * t_d / 2.));
+
 
         // Not enough distance to accel to max speed -> triangle profile
-        if (x_a + x_d > x){
-            x_a = x_d = x / 2.; // assumes a_max and d_max are equal!   
+        if (x_a_ + d_x_ > x){
+            x_a_ = d_x_ = x / 2.; // assumes a_max and d_max are equal!
             // Above will result in x_c = 0 
-            t_a = accel_t_for_x(x_a, v_0, joint.a_max);
-            t_d = accel_t_for_x(x_d, v_1, joint.d_max);
+            t_a = accel_t_for_x(x_a_, v_0, joint.a_max);
+            t_d = accel_t_for_x(d_x_, v_1, joint.a_max);
         }
 
 
-        float x_c = x - x_a - x_d;
+        float x_c = x - x_a_ - d_x_;
         float t_c = 0;
 
         if (v_c != 0){
@@ -246,7 +248,6 @@ void JointSegment::update_v_c(){
 
     update_sub_segments();
 
-    return;
 }
 
 float JointSegment::mean_v(){
@@ -300,14 +301,7 @@ void JointSegment::loadJointSubSeg(JointSubSegment& jss, SubSegName phase)  {
     }
 }
 
-ostream &operator<<( ostream &output, const Joint &j ) { 
-
-    output << "[J " << j.n << " v=" << j.v_max << " a=" << j.a_max << " d=" << j.d_max << " ]";
-    return output;
-
-}
-
-ostream &operator<<( ostream &output, const PhaseJoints &pj ) { 
+ostream &operator<<( ostream &output, const PhaseJoints &pj ) {
 
     output << "(" << setw(8) << pj.t << ")";
     for(const JointSubSegment &jss : pj.moves ){
@@ -334,4 +328,9 @@ ostream &operator<<( ostream &output, const JointSubSegment3 &j ) {
     << "]";  
 
     return output;      
+}
+
+ostream &operator<<(ostream &output, const Joint &pj) {
+    output << "No conversion for joint yet" << endl;
+    return output;
 }

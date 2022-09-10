@@ -10,6 +10,7 @@
 #include "trj_planner.h"
 #include "trj_segment.h"
 #include "trj_jointss.h"
+#include "trj_joint.h"
 
 using namespace std;
 

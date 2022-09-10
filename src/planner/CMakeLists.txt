@@ -1,16 +1,17 @@
 
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.23)
 set (CMAKE_CXX_STANDARD 11)
 
 project(planner VERSION 0.1)
 
 add_library( ${PROJECT_NAME}
-trj_jointss.cpp
-trj_move.cpp
-trj_planner.cpp
-trj_segment.cpp
-trj_stepdriver.cpp
-trj_util.cpp
+    trj_jointss.cpp
+    trj_move.cpp
+    trj_planner.cpp
+    trj_segment.cpp
+    trj_stepdriver.cpp
+    trj_util.cpp
+    trj_block.cpp
 )
 
 configure_file(version.h.in version.h)

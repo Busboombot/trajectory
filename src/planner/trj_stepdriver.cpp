@@ -5,6 +5,7 @@
 #include "trj_util.h"
 #include "trj_debug.h"
 #include "trj_debug.h"
+#include "trj_joint.h"
 
 #include <sstream>
 

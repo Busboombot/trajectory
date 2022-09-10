@@ -5,10 +5,10 @@
 
 #include "trj_segment.h"
 #include "trj_jointss.h"
+#include "trj_joint.h"
 
 
-
-Segment::Segment(std::vector<Joint> joints, Segment* prior,  const Move& move): 
+Segment::Segment(std::vector<Joint> joints, Segment* prior,  const Move& move):
         n(move.seq), target_t(move.t) {
 
     int axis_n = 0;

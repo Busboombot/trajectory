@@ -6,11 +6,12 @@
 #include <array>
 #include <iostream>
 #include <iomanip>
-#include <math.h> // rint
+#include <cmath> // rint
 
 #include "trj_planner_const.h"
+#include "trj_joint.h"
 
-
+#pragma once
 using std::cout;
 using std::endl;
 using std::setw;
@@ -20,26 +21,7 @@ using std::ostream;
 
 class Segment;
 
-class Joint {
-
-public:
-
-    Joint(int n, float v_max, float a_max): n(n), v_max(v_max), a_max(a_max), d_max(a_max){}
-
-    Joint(): n(0), v_max(0), a_max(0), d_max(0){}
-
-    Joint(int n): n(n), v_max(0), a_max(0), d_max(0){}
-
-    int n;
-    float v_max;
-    float a_max;
-    float d_max;
-
-    friend ostream &operator<<( ostream &output, const Joint &j );
-
-};
-
- enum class SubSegName { NONE=4, ACCEL=0, CRUISE=1, DECEL=2 };
+enum class SubSegName { NONE=4, ACCEL=0, CRUISE=1, DECEL=2 };
 
 // Parameters for one phase of a segement for one joint. 
 struct JointSubSegment {
@@ -58,7 +40,7 @@ struct JointSubSegment {
 };
 
 
-// All of the move parameters for one phase, for all joints. 
+// All the move parameters for one phase, for all joints.
 
 using AxisMoves = std::array<JointSubSegment, N_AXES>;
 
@@ -135,7 +117,7 @@ public:
     float update_sub_segments();
     void update_start_velocity_limit(bool is_first, bool sign_change);
     void update_end_velocity_limit(bool is_last);
-    void update_boundary_velocity(JointSegment *prior_js, JointSegment* next_js);
+    void update_boundary_velocity(JointSegment *prior_js_, JointSegment* next_js_);
 
     float calc_x(float v_c);
     float search_v_c();

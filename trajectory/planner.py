@@ -276,10 +276,12 @@ class SegmentList(object):
 
         o = []
         for s in list(self.segments)[index:]:
-            for b in s.blocks:
-                if b.next:
-                    if abs(b.v_1 - b.next.v_0) > 2:
-                        o.append((b, b.next))
+            if not s.next:
+                continue
+
+            for c,n in zip(s.blocks, s.next.blocks):
+                if abs(c.v_1 - n.v_0) > 2:
+                    o.append((c, n))
         return o
 
     @property

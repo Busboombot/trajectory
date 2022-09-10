@@ -10,6 +10,11 @@ bool same_sign(float a, float b){
     return (a == 0) or (b == 0) or (sgn(a) == sgn(b));
 }
 
+int sign(int x) {
+    if (x == 0) return 0;
+    else if  (x > 0) return 1;
+    else return -1;
+}
 
 #ifdef TRJ_ENV_HOST
 void delay(uint32_t ms){

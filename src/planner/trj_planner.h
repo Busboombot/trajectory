@@ -15,6 +15,7 @@
 #include "trj_util.h"
 #include "trj_move.h"
 #include "trj_segment.h"
+#include "trj_joint.h"
 
 using std::array;
 using std::cout;

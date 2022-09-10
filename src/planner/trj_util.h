@@ -36,6 +36,7 @@ template <typename T> int sgn(T val) {
 }
 
 bool same_sign(float a, float b);
+int sign(int a);
 
 // To convert class enums to ints. 
 //template <typename E>

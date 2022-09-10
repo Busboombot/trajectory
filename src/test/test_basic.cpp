@@ -1,5 +1,3 @@
-
-
 #include <iostream>
 #include <vector>
 #include <cstdlib>
@@ -9,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "trj_planner.h"
 #include "trj_segment.h"
+#include "trj_joint.h"
 
 vector<Move> get2Moves(){
     return std::vector<Move>{
