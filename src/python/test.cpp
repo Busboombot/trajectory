@@ -6,7 +6,7 @@ char const* greet()
 }
 
 
-BOOST_PYTHON_MODULE(hello_ext)
+BOOST_PYTHON_MODULE(pyplan)
 {
     using namespace boost::python;
     def("greet", greet);
