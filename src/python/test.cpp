@@ -1,5 +1,7 @@
 #include <boost/python.hpp>
 
+#include "trj_block.h"
+
 char const* greet()
 {
     return "hello, world";

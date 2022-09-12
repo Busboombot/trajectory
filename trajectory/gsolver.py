@@ -27,27 +27,6 @@ def binary_search(f, v_min, v_guess, v_max):
     else:
         return None
 
-
-def set_bv(x, v_0, v_1, a_max):
-    """Reduce v_0 and v_1 for small values of x when there is an
-    error in x after planning """
-
-    x_a, t_a = accel_xt(v_0, 0, a_max)
-    x_d = x - x_a
-
-    if x_d < 0:
-        v_0 = int(sqrt(2 * a_max * x))
-        v_1 = 0
-    elif x == 0:
-        v_0 = 0
-        v_1 = 0
-    else:
-        v_0 = v_0
-        v_1 = int(min(sqrt(2 * a_max * x_d), v_1))
-
-    return (v_0, v_1)
-
-
 def accel_xt(v_i, v_f, a):
     """Distance and time required to accelerate from v0 to v1 at acceleration a"""
 
@@ -93,10 +72,12 @@ class Joint:
     # distances below the small x limit will never hit v_max before needing to decelerate
     small_x: float = None  # min distance for v_max->0->v_max
     max_discontinuity: float = None  # Max velocity difference between adjacent blocks
+    max_at: float = None # Max time to accel from 0 to v_max
 
     def __post_init__(self):
         self.small_x = (self.v_max ** 2) / (2 * self.a_max)
         self.max_discontinuity = self.a_max / self.v_max  # Max vel change in 1 step
+        self.max_at = self.v_max / self.a_max
 
     def new_block(self, x, v_0=None, v_1=None):
         v_0 = v_0 if v_0 is not None else self.v_max
@@ -148,14 +129,13 @@ class ACDBlock:
         v_max = self.joint.v_max
 
         # Limit the boundary values for small moves
-        self.v_0, self.v_1 = set_bv(self.x, self.v_0, self.v_1, self.joint.a_max)
+        self.limit_bv()
 
         self.v_0 = min(self.v_0, v_max)
         self.v_1 = min(self.v_1, v_max)
 
         if self.x == 0:
             self.v_c = self.v_0 = self.v_1 = 0
-
 
         elif self.x < 2 * self.joint.small_x:
             # The limit is the same one used for set_bv.
@@ -171,7 +151,6 @@ class ACDBlock:
             # self.v_1 = 0
             self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
             # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
-
 
         else:
             # If there is more area than the triangular profile for these boundary
@@ -233,7 +212,6 @@ class ACDBlock:
 
         self.consistantize()
 
-
         assert self.v_0 <= self.joint.v_max
         assert self.v_c <= self.joint.v_max, self.v_c
         assert self.v_1 <= self.joint.v_max
@@ -243,6 +221,8 @@ class ACDBlock:
     def plan(self, t):
 
         self.t = t
+
+        self.limit_bv()
 
         a_max = self.joint.a_max
 
@@ -255,7 +235,13 @@ class ACDBlock:
         # selection changes the segment time.
 
         def err(v_c):
-            return self.x - self.replace(v_c=v_c).arear
+
+            x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
+
+            t_c = max(self.t - t_ad, 0)
+            x_c = max(v_c, 0) * t_c
+
+            return self.x - (x_ad + x_c)
 
         self.v_c = min(binary_search(err, 0,
                                      self.x / self.t, self.joint.v_max), self.joint.v_max)
@@ -270,11 +256,6 @@ class ACDBlock:
 
         x_c = self.consistantize()
 
-        def psfrt(t, flag):  # plan, set flag and return
-            b = self.plan(t)
-            b.flag = 'NT'
-            return b
-
         x_err = abs(round(self.area) - self.x)
 
         if round(x_c) < 0 or (self.x > 25 and x_err > 1):
@@ -286,15 +267,15 @@ class ACDBlock:
 
             if self.v_1 > 0:
                 self.v_1 = 0
-                return psfrt(t, 'V1Z')
+                return self.plan(t)
 
             elif self.v_0 > 0:
                 self.v_0 = 0
-                return psfrt(t, 'V0Z')
+                return self.plan(t)
 
             elif abs(new_t - self.t) > 0.0005:
 
-                return psfrt(new_t, 'NT')
+                return self.plan(t)
             else:
                 raise ConvergenceError(
                     'Unsolvable profile, incorrect area: '
@@ -304,15 +285,12 @@ class ACDBlock:
             # This block is still too long.
             if self.v_1 != 0:
                 self.v_1 = 0
-                return psfrt(t, 'HT1')
+                return self.plan(t)
             elif round(self.v_0) > 0:
                 self.v_0 = self.v_0 / 2
-                return psfrt(t, 'HT1')
+                return self.plan(t)
             else:
                 pass
-                # raise ConvergenceError(
-                #    'Unsolvable profile, wrong time: '
-                #    f't={self.t}, commanded t ={t} t_ad={self.t_a + self.t_d} v_c={self.v_c}')
 
         assert round(self.x_a + self.x_d) <= self.x
         # assert self.t_a + self.t_d <= self.t
@@ -329,8 +307,6 @@ class ACDBlock:
         """Recalculate t to make x and v values integers, and everything more consistent
          This operation will maintain the original value for x, but may change t"""
 
-        self.x_a = self.x_a
-        self.x_d = self.x_d
         self.x_c = self.x - (self.x_a + self.x_d)
 
         self.t_a = abs((self.v_c - self.v_0) / self.joint.a_max)
@@ -357,19 +333,6 @@ class ACDBlock:
             return self.x_c, x_e
         else:
             return self.x_c
-
-    def set_bv(self, v_0=None, v_1=None):
-
-        v_0 = v_0 if v_0 is not None else self.v_0
-        v_1 = v_1 if v_1 is not None else self.v_1
-
-        self.v_0, self.v_1 = set_bv(self.x, v_0, v_1, self.joint.a_max)
-
-    def asdict(self):
-        return asdict(self)
-
-    def replace(self, **kwds):
-        return replace(self, **kwds)
 
     @property
     def area(self):
@@ -404,7 +367,6 @@ class ACDBlock:
 
     def set_zero(self):
 
-
         self.x_a = self.x_d = self.x_c = 0
         self.t_a = self.t_d = self.t_c = 0
         self.v_0 = self.v_c = self.v_1 = 0
@@ -423,6 +385,26 @@ class ACDBlock:
 
         return pd.DataFrame(rows)
 
+    def limit_bv(self):
+
+        x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
+        x_d = self.x - x_a
+
+        if x_d < 0:
+            self.v_0 = int(min(self.v_0, sqrt(2 * self.joint.a_max * self.x)))
+            self.v_1 = 0
+        elif self.x == 0:
+            self.v_0 = 0
+            self.v_1 = 0
+        else:
+            self.v_1 = int(min(sqrt(2 * self.joint.a_max * x_d), self.v_1))
+
+    def asdict(self):
+        return asdict(self)
+
+    def replace(self, **kwds):
+        return replace(self, **kwds)
+
     def plot(self, ax=None):
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
@@ -433,9 +415,9 @@ class ACDBlock:
             period = self.step_period
 
         return [
-            Stepper(self.x_a, self.v_0, self.v_c, self.d, period),
-            Stepper(self.x_c, self.v_c, self.v_c, self.d, period),
-            Stepper(self.x_d, self.v_c, self.v_1, self.d, period),
+            Stepper(self.d*self.x_a, self.v_0, self.v_c, period),
+            Stepper(self.d*self.x_c, self.v_c, self.v_c, period),
+            Stepper(self.d*self.x_d, self.v_c, self.v_1, period),
         ]
 
     def iter_steps(self, until_t=None, period=None):
@@ -446,7 +428,7 @@ class ACDBlock:
         if until_t is None:
             until_t = int(self.segment.time * period * TIMEBASE)
         else:
-            until_t *= int( period * TIMEBASE)
+            until_t *= int(period * TIMEBASE)
 
         t = 0
         for s in self.steppers(period):

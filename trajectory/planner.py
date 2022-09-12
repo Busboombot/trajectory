@@ -29,18 +29,14 @@ from https://www.embedded.com/generate-stepper-motor-speed-profiles-in-real-time
 
 Joint segment shapes
 
-
-
 """
+import math
 from collections import deque
 from typing import List
-from warnings import warn
 
 import pandas as pd
 
-from . import ConvergenceError
-from .gsolver import Joint, ACDBlock
-
+from .gsolver import Joint, ACDBlock, same_sign
 
 def index_clip(n, l):
     """Clip the indexer to an list to a valid range"""
@@ -51,20 +47,22 @@ class Segment(object):
     """One segment, for all joints"""
 
     n: int = None
-    next: "Segment" = None
-    prior: "Segment" = None
-    blocks: "List[ACDBlock]" = None
     t: float = 0
+    blocks: "List[ACDBlock]" = None
+    prior: "Segment" = None
 
     replans: int = 0
 
-    def __init__(self, n, blocks: List[ACDBlock]):
+    def __init__(self, n, blocks: List[ACDBlock], prior: "Segment" = None):
 
         self.n = n
         self.blocks = blocks
 
         for b in self.blocks:
             b.segment = self
+
+        if prior is not None:
+            self.prior = prior
 
     def init(self):
         """Re-initialize all of the blocks"""
@@ -73,44 +71,44 @@ class Segment(object):
 
         return self
 
-    def plan(self, style='T', v_0=None, v_1=None):
+    def set_bv(self, v_0=None, v_1=None):
+        if hasattr(v_0, "__len__"):
+            for b, v in zip(self.blocks, v_0):
+                b.v_0 = v
+        elif v_0 is not None:
+            for b in self.blocks:
+                b.v_0 = v_0
 
-        self.replans += 1
+        if hasattr(v_1, "__len__"):
+            for b, v in zip(self.blocks, v_1):
+                b.v_1 = v
+        elif v_1 is not None:
+            for b in self.blocks:
+                b.v_1 = v_1
 
-        assert self.replans < 50
+        for b in self.blocks:
+            b.limit_bv()
 
-        bv_none = [None] * len(self.blocks)
+    def plan(self):
 
-        if v_0 is not None and not hasattr(v_0, "__len__"):
-            v_0 = [v_0 for _ in self.blocks]
-        elif v_0 is None:
-            v_0 = bv_none
+        mt = max(self.times)
 
-        if v_1 is not None and not hasattr(v_1, "__len__"):
-            v_1 = [v_1 for _ in self.blocks]
-        elif v_1 is None:
-            v_1 = bv_none
+        for b in self:
+            b.plan(mt)
 
-        for b, v_0, v_1 in zip(self.blocks, v_0, v_1):
-            b.set_bv(v_0=v_0, v_1=v_1)
+        return self.times_e_rms;
 
-        for i in range(6):
+    def plan_ramp(self, v_0=None):
 
-            mt = max(self.times)
+        for b in self.blocks:
+            b.v_1 = b.joint.v_max
 
-            for b in self:
-                if style == 'R':
-                    b.plan_ramp(mt)
-                else:
-                    b.plan(mt)
+        mt = max(self.times)
 
-            if self.times_e_rms < 0.001:
-                break
-        else:
-            if self.times_e_rms < 0.003:
-                warn(f"Failed to converge sid={self.n} with err > 0.001, but < 0.003")
-            else:
-                warn(f'Failed to converge for sid={self.n}, rms={self.times_e_rms}, times={self.times}')
+        for b in self:
+            b.plan_ramp(mt)
+
+        return self.times_e_rms;
 
     @property
     def v_0(self):
@@ -181,6 +179,7 @@ class Segment(object):
 
 class SegmentList(object):
     segments: List[Segment]
+    replans: List[int] = None
 
     def __init__(self, joints: List[Joint]):
 
@@ -193,6 +192,8 @@ class SegmentList(object):
 
         self.segments = deque()
 
+        self.replans = []
+
     def move(self, x: List[int], update=True, planner=None):
         """Add a new segment, with joints expressing joint distance
         :type x: object
@@ -204,70 +205,94 @@ class SegmentList(object):
 
         prior = self.segments[-1] if len(self.segments) > 0 else None
 
-        s = Segment(len(self.segments), blocks)
+        s = Segment(len(self.segments), blocks, prior)
 
         s.init()
 
-        self.plan(s, prior)
-
-        if prior:
-            prior.next = s
-            s.prior = prior
-
         self.segments.append(s)
+
+        self.plan()
 
         return s
 
-    def plan(self, s, prior, _recurse=True):
+    def plan_at_boundary(self, a, b):
+        """Plan two segments, the current and immediately prior, to
+        get a consistent set of boundary velocities between them """
 
-        if s.replans > 8:
-            raise ConvergenceError(f"Too many replans in sid={s.n} ")
+        a_v0 = a.v_0
 
-        if prior:
 
-            prior.plan('R')
-            bv = self.boundary_velocities(prior, s, prior.v_1)
-            prior.plan(v_1=bv)
-            s.plan(v_0=prior.v_1)
+        # If the current block has a different sing -- changes direction --
+        # then the boundary velocity must be zero.
+        for ab, bb in zip(a.blocks, b.blocks):
+            if not same_sign(ab.d, bb.d) or ab.x == 0 or bb.x == 0:
+                ab.v_1 = 0
 
-            if s.v_0 != prior.v_1:
-                # This means that s could not handle the commanded v_0,
-                # so prior will have to yield.
-                prior.plan(v_1=s.v_0)
+        a.plan()  # Plan a first
+        b.set_bv(v_0=a.v_1)
+        b.plan()  # Plan b with maybe changed velocities from a
 
+        if b.v_0 != a.v_1:
+            # This means that the current could not handle the commanded v_0,
+            # so prior will have to yield.
+            a.set_bv(v_1=b.v_0)
+            a.plan()
+
+        be = self.boundary_error(a, b)
+
+        if a_v0 != a.v_0 or be > 1:
+            # Planning segment a changed it's v_0, so we need to o back one earlier
+            return -1
         else:
-            s.plan()
+            return 1
 
-        # Mop up remaining discontinuities
-        if _recurse:
-            for i in range(4):
-                dis = self.discontinuities(-2)
+    def plan(self):
+        """Plan the newest segment, and the one prior. If there are boundary
+        velocity discontinuities, also plan earlier segments"""
 
-                if len(dis) > 0:
-                    for i, (p, c) in enumerate(dis):
-                        self.plan(c.segment, p.segment, False)
-                else:
-                    break
+        i = len(self.segments) - 1
+        current = self.segments[i]
 
-    def boundary_velocities(self, p, c, target_v=None):
-        from .gsolver import set_bv, same_sign
+        if i == 0:
+            current.plan()
+            return
 
-        if target_v is not None and not hasattr(target_v, "__len__"):
-            target_v = [target_v for _ in self.joints]
-        elif target_v is None:
-            target_v = [j.v_max for j in self.joints]
+        prior = self.segments[i - 1]
+        prior.plan_ramp()  # Uncap the v_1 for the prior tail
 
-        bv = []
-        for pb, cb, v in zip(p.blocks, c.blocks, target_v):
-            _, pv = set_bv(pb.x, pb.v_0, v, pb.joint.a_max)
-            cv, _ = set_bv(pb.x, v, pb.v_0, pb.joint.a_max)
+        for _ in range(20):
+            # For random moves, only about 10% of the segments will have more than 2
+            # iterations, and 1% more than 10.
 
-            if not same_sign(pb.d, cb.d) or pb.x == 0 or cb.x == 0:
-                pv = cv = 0
+            if i >= len(self.segments):
+                break
 
-            bv.append(min(pv, cv))
+            current = self.segments[i]
+            prior = self.segments[i - 1]
 
-        return bv
+            inc_index = self.plan_at_boundary(prior, current)
+
+            i += inc_index
+
+            if i == 0:
+                # Hit the beginning, so need to go forward
+                i += 2
+
+        return
+
+    def boundary_error(self, p, c):
+        sq_err = 0
+
+        for pb, cb in zip(p.blocks, c.blocks):
+            sq_err += (pb.v_1 - cb.v_0) ** 2
+
+        return math.sqrt(sq_err)
+
+    @property
+    def pairs(self):
+
+        for c, n in zip(self.segments, list(self.segments)[1:]):
+            yield c, n
 
     def discontinuities(self, index=0):
         """Yield segment pairs with velocity discontinuities"""
@@ -275,13 +300,10 @@ class SegmentList(object):
         index = index_clip(index, list(self.segments))
 
         o = []
-        for s in list(self.segments)[index:]:
-            if not s.next:
-                continue
-
-            for c,n in zip(s.blocks, s.next.blocks):
-                if abs(c.v_1 - n.v_0) > 2:
-                    o.append((c, n))
+        for c, n in list(self.pairs)[index:]:
+            for cb, nb in zip(c.blocks, n.blocks):
+                if abs(cb.v_1 - nb.v_0) > 2:
+                    o.append((cb, nb))
         return o
 
     @property

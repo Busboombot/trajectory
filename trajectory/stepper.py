@@ -28,16 +28,17 @@ class Stepper(object):
     vi: float = 0
     done: bool = False
 
-    def __init__(self, x, vi, vf, direction=1, period=DEFAULT_PERIOD):
+    def __init__(self, x, vi, vf, period=DEFAULT_PERIOD):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
         vi = abs(vi)
         vf = abs(vf)
 
-        self.x = x
         self.direction = sign(x)
+        self.x = abs(x)
+
         self.vi = vi
-        self.steps_left = x
+        self.steps_left = self.x
         self.t = 0
         self.delay = 0
         self.delay_counter = 0
@@ -49,7 +50,6 @@ class Stepper(object):
         self.a = (vf ** 2 - vi ** 2) / (2 * x) if x != 0 else 0
 
     def __iter__(self):
-
         t = 0
         while True:
             t += self.delay_inc

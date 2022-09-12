@@ -5,13 +5,12 @@ set (CMAKE_CXX_STANDARD 11)
 project(planner VERSION 0.1)
 
 add_library( ${PROJECT_NAME}
-    trj_jointss.cpp
-    trj_move.cpp
-    trj_planner.cpp
-    trj_segment.cpp
-    trj_stepdriver.cpp
-    trj_util.cpp
-    trj_block.cpp
+        trj_move.cpp
+        trj_segment.cpp
+        trj_util.cpp
+        trj_block.cpp
+        trj_joint.cpp
+        trj_planner.cpp
 )
 
 configure_file(version.h.in version.h)

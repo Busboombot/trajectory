@@ -13,6 +13,8 @@ typedef std::chrono::microseconds us;
 typedef std::chrono::steady_clock steadyClock;
 typedef std::chrono::duration<uint64_t, std::micro> duration;
 
+using std::string;
+
 long micros();
 void start_usince();
 uint32_t usince();
@@ -47,3 +49,9 @@ int sign(int a);
 std::vector<std::string> splitString(const std::string& str);
 
 void hello();
+
+extern std::string yellow;
+extern std::string green;
+extern std::string blue;
+extern std::string blue_bg;
+extern std::string creset;

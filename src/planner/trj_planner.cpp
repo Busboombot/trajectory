@@ -1,156 +1,168 @@
 
-#include <functional>
-#include <math.h> // abs
-#include <algorithm>    // std::min
+
+#include <cmath> // abs
+
 #include <iostream>
 #include <vector>
-#include <assert.h>
-#include <sstream>
-
 #include "trj_planner.h"
 #include "trj_segment.h"
-#include "trj_jointss.h"
 #include "trj_joint.h"
+#include "trj_types.h"
+#include "trj_util.h"
 
 using namespace std;
 
 int here_count = 0; // for the HERE macro, in trj_util
 
-Planner::Planner(std::vector<Joint> joints_){
-    
+
+Planner::Planner(std::vector<Joint> joints_) {
+
     joints.resize(joints_.size());
+
     current_position.resize(joints.size());
-    
     current_position = {0};
-    
+
     int i = 0;
-    for(Joint &j: joints_){
+    for (Joint &j: joints_) {
         j.n = i++;
         setJoint(j);
     }
 }
 
-Planner::Planner(){
-    joints.resize(N_AXES);
-    current_position.resize(joints.size());
+
+void Planner::move(const Move &move) {
+    this->move(move.x);
 }
 
-void Planner::setJoint(Joint &joint){
-    if((int)joint.n < (int)joints.size()){
+void Planner::move(const MoveArray &move) {
+    segments.emplace_back(joints, move);
+
+    plan();
+
+}
+
+void Planner::plan(){
+    // Plan the newest segment, and the one prior. If there are boundary
+    // velocity discontinuities, also plan earlier segments
+
+
+    u_long i = segments.size() - 1;
+    Segment& current = segments[i];
+
+    cout << "Plan " << i << endl;
+
+    if (i == 0) {
+        current.plan();
+        return;
+    }
+
+
+    Segment& prior = segments[i - 1];
+    prior.plan_ramp();  // Uncap the v_1 for the prior tail
+
+
+    return ;
+
+
+    for(int n = 0; n < 20; n++){
+        // For random moves, only about 10% of the segments will have more than 2
+        // iterations, and 1% more than 10.
+
+        if (i >= segments.size() ){
+            break;
+        }
+
+        current = segments[i];
+        prior = segments[i - 1];
+
+        i += plan_at_boundary(prior, current);
+
+        if (i == 0){
+            // Hit the beginning, so need to go forward
+            i += 2;
+        }
+    }
+
+}
+int Planner::plan_at_boundary(Segment &a, Segment &b) {
+    // Plan two segments, the current and immediately prior, to
+    // get a consistent set of boundary velocities between them
+
+    VelocityVector a_v0 = a.getV0();
+
+    for(int i = 0; i < joints.size(); i++){
+        a.blocks[i].limitBv(b.blocks[i]);
+    }
+
+    a.plan();
+    b.setBv(a.getV1(), V_NAN);
+    b.plan() ;
+
+    if (b.getV0() != a.getV1()) {
+        // This means that the current could not handle the commanded v_0,
+        // so prior will have to yield.
+        a.setBv(V_NAN, b.getV0());
+        a.plan();
+    }
+
+    if (a_v0 != a.getV0() || boundary_error(a, b) > 1) {
+        // Planning segment a changed it's v_0, so we need to o back one earlier
+        return -1;
+    } else {
+        return 1;
+    }
+
+}
+
+/**
+ * RMS difference between velocities of blocks in two segments, at their boundary
+ * @param p
+ * @param c
+ * @return
+ */
+double Planner::boundary_error(Segment &p, Segment &c){
+
+    double sq_err = 0;
+
+    for(int i = 0; i < joints.size(); i++ ){
+        sq_err =pow( (p.blocks[i].v_1 - c.blocks[i].v_0) ,2);
+    }
+
+    return sqrt(sq_err);
+}
+
+
+void Planner::setNJoints(int n_joints) {
+    joints.resize(n_joints);
+}
+
+
+void Planner::setJoint(Joint &joint) {
+    if ((int) joint.n < (int) joints.size()) {
         joints[joint.n] = joint;
     }
 }
 
 
-
-void Planner::push(const Move& move){ // push to tail
-
-    Move move_ = move;
-
-    if(move_.move_type == Move::MoveType::jog){
-        // For jogs, we remove the last item, if there are more than two, 
-        // and replace it. 
-        
-        if (  getQueueSize() >= 6 ){
-            Segment* last = segments.back();
-            segments.pop_back();
-            queue_size -= 3;
-            
-            MoveArray last_moves = last->getMoves();
-            
-            for(unsigned int i=0; i < joints.size(); i++){
-                current_position[i] -= last_moves[i];
-            }
-        } 
-        // Now it is just a regular relative move_. 
-        move_.move_type = Move::MoveType::relative;
-    }
-    
-    // Transform the move from realtive to absolute. The result is that
-    // the new position is the value of the move x position
-    if(move_.move_type == Move::MoveType::absolute){
-        for(unsigned int i=0; i < joints.size(); i++){
-            int32_t x = move_.x[i]  ;
-            move_.x[i]  -= current_position[i]; // absolute to relative
-            current_position[i] = x; // current position is old absolute position
-        }
-    } else {  // relative
-        for(unsigned int i=0; i < joints.size(); i++){
-            current_position[i] += move_.x[i];
-        }
-    }
-    
-    Segment* last = 0;
-    
-    if (segments.size() > 0)
-        last = segments.back();
-    
-    Segment *segment = new Segment(joints, last, move_);
-
-    
-    segments.push_back(segment);
-  
-    queue_time += segment->getTicks();
-    queue_size += 3;
-}
+bool Planner::isEmpty() { return segments.size() == 0; }
 
 
-void Planner::push(int seq, int t, MoveArray x){ // push to tail
-    push(Move(seq, t, Move::MoveType::relative, x));
-
-}
+ostream &operator<<(ostream &output, const Planner &p) {
 
 
-const PhaseJoints& Planner::getCurrentPhase(){   
-    return phase_joints;
-}
-
-const PhaseJoints& Planner::getNextPhase(){    
-
-    if (segments.size() == 0){
-        return phase_joints; // Should have an ssn of NONE; 
+    cout << blue_bg << "════  Joints ════" << creset << endl;
+    for (const Joint j: p.joints) {
+        output << j ;
     }
 
-    segments.front()->getPhaseJoints(phase_joints, current_phase++);
-    queue_size--;
-    queue_time -= phase_joints.t;
-    
-    // Some of the cruise phases have zero time; these are triange segments
-    // We sould just skip over these. 
-    if (phase_joints.ssn == SubSegName::CRUISE  and phase_joints.t == 0){
-        queue_size--;
-        segments.front()->getPhaseJoints(phase_joints, current_phase++);
+    cout << endl << blue_bg << "════ Segments ════" << creset << endl;
+
+    for (const Segment& s: p.segments) {
+        output << s;
     }
 
-    // If we were working on the last phase ( decelleration ) of a segment, 
-    // then it is time to remove the whole segment. 
-    if (current_phase == 3){  // 
-        delete segments.front();
-        segments.pop_front();
-        current_phase = 0;
 
-        if (segments.size() == 0){
-            phase_joints.ssn = SubSegName::NONE;
-            phase_joints.t = 0;
-            
-            queue_size = 0;
-            queue_time = 0;
-        }
-    }
 
-    return phase_joints;
-}
-
-ostream &operator<<( ostream &output, const Planner &p ) { 
-
-    for(const Segment *s : p.segments){
-        output << *s << endl;
-    }
-    output << endl;
-
-    for(const Joint j : p.joints){
-        output << j << endl;
-    }
 
     return output;
 }

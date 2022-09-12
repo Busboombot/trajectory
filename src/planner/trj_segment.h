@@ -1,16 +1,20 @@
 #pragma once
 
+#include <utility>
 #include <vector>
 #include <iostream>
 
 #include "trj_util.h"
-#include "trj_jointss.h"
+#include "trj_block.h"
 #include "trj_move.h"
 #include "trj_joint.h"
+#include "trj_types.h"
+
 
 using namespace std;
 
-/// Segment, working data for one move for all axes
+class Planner;
+
 /* Segment: One move for all joints, with Accel, Cruise and Decel phases. 
  * 
  *
@@ -18,50 +22,46 @@ using namespace std;
 
 class Segment {
 
-public: 
+private:
 
     int n;
+    double t{};
+    MoveType moveType = MoveType::none;
 
-    float target_t = 0; // time the seg should take to execute.
+    vector<Block> blocks;
+    vector<Joint> joints;
+    MoveArray moves;
 
-    float t = 0;
-    float t_a = 0;
-    float t_c = 0;
-    float t_d = 0;
-
-    Segment *next = 0;
-    Segment *prior = 0;
-
-    std::vector<JointSegment> joint_segments;
-
-    std::vector<Joint> joints;
-
-    bool sign_change = false;
-
-    Move::MoveType move_type = Move::MoveType::none; 
-
-    friend ostream &operator<<( ostream &output, const Segment &s );
+    u_long n_joints;
 
 public:
 
-    Segment(std::vector<Joint> joints, Segment* prior, const Move& move);
+    Segment(const std::vector<Joint>&  joints, MoveArray moveS );
+    Segment(const std::vector<Joint>&  joints, const Move& move );
 
-    // Return segment time in ticks ( microseconds )
-    int32_t getTicks(){
-        //ser_printf("TICKS %f %d", t, SEC_TO_TICKS(t));
-        //cout << " TICKS " << t << " " << SEC_TO_TICKS(t) << endl;
-        return SEC_TO_TICKS(t);
-    }
+    void plan();
 
-    void update_second_to_last();
-    void update_last(Segment* prior);
+    void plan(double v_i, double v_f);
 
-    // Return all joint segments in a single structure, for debug printing. 
-    SubSegments3 *getSubSegments3();
+    void plan(VelocityVector v_0_, VelocityVector v_1_);
 
-    // Fill a given phase joints record
-    void getPhaseJoints(PhaseJoints& pj, int phase);
+    void plan_ramp();
 
-    MoveArray getMoves();
+    void setBv(double v_0, double v_1);
 
+    void setBv(VelocityVector v_0_, VelocityVector v_1_);
+
+public:
+
+    MoveType getMoveType() const;
+
+    const MoveArray& getMoves() const {return moves;}
+
+    VelocityVector getV0();
+    VelocityVector getV1();
+
+
+    friend Planner;
+
+    friend ostream &operator<<( ostream &output, const Segment &s );
 };

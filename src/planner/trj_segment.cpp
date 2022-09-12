@@ -1,174 +1,108 @@
-
-#include <functional>
-#include <math.h> // abs
-#include <algorithm>    // std::min
+#include <cmath> // abs
 
 #include "trj_segment.h"
-#include "trj_jointss.h"
-#include "trj_joint.h"
+#include "trj_block.h"
 
+ostream &operator<<(ostream &output, const Segment &s) {
 
-Segment::Segment(std::vector<Joint> joints, Segment* prior,  const Move& move):
-        n(move.seq), target_t(move.t) {
+    output << setw(6) << setprecision(4) << s.t << " ";
+
+    for (const Block &b: s.blocks) {
+        output << b;
+    }
+
+    output << endl;
+    return output;
+}
+
+Segment::Segment(const std::vector<Joint>&  joints, MoveArray move ) :
+        n(0), t(0), joints(joints), moves(std::move(move)) {
 
     int axis_n = 0;
-
-    move_type = move.move_type;
-   
-    for(Joint& joint : joints){
-        joint_segments.emplace_back(axis_n, joint, this,move.x[axis_n]);
+    for (Joint &joint: this->joints) {
+        blocks.emplace_back(this->moves[axis_n], &joint, this);
+        blocks.back().init();
         axis_n++;
     }
 
-    if (prior){ // If this isn't the first segment. 
-        
-        // Iterate through the JointSegements for this segment, and the prior one:
-        // 1) Link the two together through next and prior links
-        // 2) Check if any of the axes have change direction, which will
-        //    force the boundary velocity to zero. 
-        jsIter prior_js = prior->joint_segments.begin();
-    
-        for(JointSegment& js : joint_segments){
-            
-            (*prior_js).next_js = &js;
-            js.prior_js = &(*prior_js);
-            
-            sign_change = sign_change or !same_sign((*prior_js).sign, js.sign );
+    n_joints = joints.size();
 
-            prior_js++;
-        }
-        
-        prior->update_second_to_last();
-        
-    }
+}
 
-    update_last(prior);
+Segment::Segment(const std::vector<Joint>&  joints, const Move& move ) : Segment(joints, move.x ){
+
 }
 
 
-void Segment::update_last(Segment* prior){
+void Segment::setBv(vector<double> v_0_, vector<double> v_1_) {
 
-    const JointSegment *longest = &joint_segments[0];
-
-    float max_t_min = 0;
-    for(JointSegment &js : joint_segments){
-        js.update_t_min();
-
-        if (js.t_min > max_t_min){
-            max_t_min = js.t_min;
-            longest = &js; 
-        }
-    }
-
-    t_a = longest->t_a_min;
-    t_c = longest->t_c_min;
-    t_d = longest->t_d_min;
-    
-    t = longest->t_min;
-
-    for(JointSegment &js : joint_segments){
-        js.update_sub_segments();
-        js.update_end_velocity_limit(true);
-        js.update_start_velocity_limit(prior==0, sign_change);
-    }
-    
-    if (prior != 0){
-        int i=0;
-        for(JointSegment& prior_js : prior->joint_segments){
-            JointSegment &next_js =  joint_segments[i];
-            next_js.update_boundary_velocity(&prior_js, NULL);
-            prior_js.update_boundary_velocity(NULL, &next_js);
-            i++;
-        }
-        
-    }
-    
-    for(JointSegment &js : joint_segments){
-        js.update_v_c();
+    for (int i = 0; i < blocks.size(); i++) {
+        blocks[i].setBv(v_0_[i], v_1_[i]);
     }
 }
 
-void Segment::update_second_to_last(){
-
-        for(JointSegment &js : joint_segments){
-            js.update_sub_segments();
-            js.update_end_velocity_limit(false);
-        }
-
-        for(JointSegment &js : joint_segments){
-            js.update_v_c();
-        }
+void Segment::setBv(double v_0_, double v_1_) {
+    for (Block &b: blocks) {
+        b.setBv(v_0_, v_1_);
+    }
 }
 
-// Return a new Subsegments vector
-SubSegments3 *Segment::getSubSegments3(){
+void Segment::plan() {
 
-    SubSegments3 *v = new SubSegments3();
-
-    for(JointSegment& js : joint_segments)
-        v->push_back(js.getSubSegments3());
-
-    return v;
-}
-
-/**
- * @brief Load parameters from a phase of a segment into the PhaseJoints 
- * object, from which the steps will be stepped out. 
- * 
- * @param pj 
- * @param phase 
- */
-void Segment::getPhaseJoints(PhaseJoints& pj, int phase){
-   
-    pj.seq = n;
-
-    switch (phase){
-
-        case 0: 
-            pj.t = SEC_TO_TICKS(t_a);
-            pj.ssn = SubSegName::ACCEL;
-            break;
-        case 1: 
-            pj.t = SEC_TO_TICKS(t_c);
-            pj.ssn = SubSegName::CRUISE;
-            break;
-        case 2: 
-            pj.t = SEC_TO_TICKS(t_d);
-            pj.ssn = SubSegName::DECEL;
-            break;
+    for (Block &b: this->blocks) {
+        t = fmax(t, b.getT());
     }
 
-    for(JointSegment& js : joint_segments){
-        js.loadJointSubSeg(pj.moves[js.n], pj.ssn);
+    for (Block &b: this->blocks) {
+        b.plan(t);
     }
 
 }
 
-MoveArray Segment::getMoves(){
-    MoveArray m;
-    m.resize(joint_segments.size());
-   
-    for(unsigned int i = 0; i < joint_segments.size(); i++){
-        m[i] = joint_segments[i].x;
-    }
-       
-     return m; 
+void Segment::plan(double v_0_, double v_1_) {
+    setBv(v_0_, v_1_);
+    plan();
 }
 
+void Segment::plan(vector<double> v_0_, vector<double> v_1_) {
+    setBv(std::move(v_0_), std::move(v_1_));
+    plan();
+}
 
-ostream& operator<<( ostream &output, const Segment &s ) { 
+void Segment::plan_ramp() {
 
-    output <<  std::setprecision(3) << s.n << " ["  
-            << setw(7) << s.t_a << " " 
-            << setw(7) << s.t_c << " " 
-            << setw(7) << s.t_d << "]";
-
-    for(const JointSegment& js : s.joint_segments){
-        output << js.getSubSegments3();
-        break;
+    for (Block &b: this->blocks) {
+        t = fmax(t, b.getT());
     }
 
-    output << " ... <only 1 ss shown >";
+    for (Block &b: this->blocks) {
+        b.plan_ramp(t);
+    }
 
-    return output;      
+}
+
+MoveType Segment::getMoveType() const {
+    return moveType;
+}
+
+VelocityVector Segment::getV0() {
+
+    VelocityVector vv(n_joints);
+
+    for (Block &b: this->blocks) {
+        vv.push_back(b.getV0());
+    }
+
+    return vv;
+}
+
+VelocityVector Segment::getV1() {
+
+    VelocityVector vv(n_joints);
+
+    for (Block &b: this->blocks) {
+        vv.push_back(b.getV1());
+    }
+
+    return vv;
 }

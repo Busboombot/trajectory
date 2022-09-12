@@ -8,7 +8,7 @@
 
 std::ostream &operator<<(std::ostream &output, const Joint &j) {
 
-    output << "[J " << j.n << " v=" << j.v_max << " a=" << j.a_max << " d=" << j.d_max << " ]";
+    output << "[J " << j.n << " v=" << j.v_max << " a=" << j.a_max  << " ]";
     return output;
 
 }

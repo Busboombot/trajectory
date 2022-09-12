@@ -14,7 +14,6 @@ using std::left;
 using std::right;
 using std::ostream;
 
-
 ostream &operator<<( ostream &output, const Move &m ) {
     
     output << "[Move #" << m.seq << " " << (int)m.move_type <<  " t=" <<m.t << " (" ;

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <cmath> // rint
 #include "trj_planner_const.h"
+#include "trj_types.h"
 
 class Joint {
 
@@ -21,9 +22,9 @@ public:
     explicit Joint(int n): Joint(n,0,0){}
 
     int n;
-    float v_max;
-    float a_max;
-    float small_x;
+    trj_float_t v_max;
+    trj_float_t a_max;
+    trj_float_t small_x;
 
     friend std::__1::ostream &operator<<(std::__1::ostream &output, const Joint &j );
 

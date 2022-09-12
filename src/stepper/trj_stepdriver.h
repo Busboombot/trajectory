@@ -1,7 +1,7 @@
 #pragma once
-#include <limits.h>
+#include <limits>
+#include <cstdint>
 
-#include "trj_jointss.h"
 #include "trj_planner_const.h" // For N_AXES
 #include "trj_config.h"
 #include "trj_planner.h"
@@ -39,8 +39,8 @@ class Stepper {
 protected:
 
 
-    AxisConfig config;
-    int8_t axis;
+    AxisConfig config{};
+    uint8_t axis;
     bool enabled = false;
     Direction direction = Direction::STOP;
 
@@ -48,17 +48,19 @@ protected:
 public:
 
     Stepper() : axis(0), enabled(false){};
-    Stepper(int8_t axis) : axis(axis), enabled(false){ config.axis=axis;};
-    Stepper(AxisConfig config) : config(config), axis(config.axis) {};
-    virtual ~Stepper(){}
+    explicit Stepper(int8_t axis) : axis(axis), enabled(false){ config.axis=axis;};
+    explicit Stepper(AxisConfig config) : config(config), axis(config.axis) {};
+    virtual ~Stepper()= default;
 
     virtual void writeStep(){ }
+    virtual void writeStep(Direction direction){ }
     virtual void clearStep(){};
     virtual void enable(){enabled = true;};
     virtual void enable(Direction dir){ setDirection(dir);enable();}
     virtual void disable() { setDirection(STOP); enabled = false;}
     void setDirection(Direction dir){direction = dir;};
-    void setConfig(AxisConfig config){ this->config = config;}
+
+    void setConfig(AxisConfig config_){ this->config = config_;}
     AxisConfig getConfig(){ return config; }
 
 private: 
@@ -77,14 +79,14 @@ protected:
 
     int period = 0; 
 
-    float delay_counter=0;
-    float delay=0;
-    float delay_inc=0;
-    float v=0;
-    float a=0;
-    float t=0;   // Running time
-    float t_s=0; // segment time, in sections
-    float v_i=0; // Initial velocity
+    double delay_counter=0;
+    double delay=0;
+    double delay_inc=0;
+    double v=0;
+    double a=0;
+    double t=0;   // Running time
+    double t_s=0; // segment time, in sections
+    double v_i=0; // Initial velocity
 
 
 public:
@@ -215,7 +217,7 @@ public:
 
 protected:
 
-    int n_axes = 0; // Gets increased in setAxisConfig
+    uint8_t n_axes = 0; // Gets increased in setAxisConfig
 
     bool running = false;
     bool enabled = false;

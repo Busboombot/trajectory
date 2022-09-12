@@ -4,7 +4,8 @@
 #include <unistd.h>
 #include "trj_util.h"
 #include <iostream>
-
+#include <string>
+#include "col.h"
 
 bool same_sign(float a, float b){
     return (a == 0) or (b == 0) or (sgn(a) == sgn(b));
@@ -66,3 +67,9 @@ std::vector<std::string> splitString(const std::string& str){
 void hello(){
     std::cout << "Hello from the trajectory planner" << std::endl;
 }
+
+std::string yellow = col::make(col::yellow, col::def, false, false, false);
+std::string green  = col::make(col::green,  col::def, false, false, false);
+std::string blue  = col::make(col::blue,  col::def, false, false, false);
+std::string blue_bg  = col::make(col::blue,  col::def, true, false, false);
+std::string creset = "\x1b[0m";
