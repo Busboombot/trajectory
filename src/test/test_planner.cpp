@@ -1,8 +1,5 @@
 #include <iostream>
 #include <vector>
-#include <cstdlib>
-#include <chrono>
-#include <ctime>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,7 +28,7 @@ TEST_CASE("Basic Planner Test", "[planner]"){
     Planner p(joints);
 
     p.move({1000,1000});
-    p.move({100,-1000});
+    p.move({1000,1000});
     p.move({1000,1000});
 
 

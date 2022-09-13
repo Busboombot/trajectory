@@ -27,6 +27,7 @@ def binary_search(f, v_min, v_guess, v_max):
     else:
         return None
 
+
 def accel_xt(v_i, v_f, a):
     """Distance and time required to accelerate from v0 to v1 at acceleration a"""
 
@@ -72,7 +73,7 @@ class Joint:
     # distances below the small x limit will never hit v_max before needing to decelerate
     small_x: float = None  # min distance for v_max->0->v_max
     max_discontinuity: float = None  # Max velocity difference between adjacent blocks
-    max_at: float = None # Max time to accel from 0 to v_max
+    max_at: float = None  # Max time to accel from 0 to v_max
 
     def __post_init__(self):
         self.small_x = (self.v_max ** 2) / (2 * self.a_max)
@@ -123,19 +124,14 @@ class ACDBlock:
         self.d = sign(self.x)
         self.x = abs(self.x)
 
-    def init(self):
+    def init(self, v_0=None, v_1=None, prior=None):
         """Find a minimum time profile for the block"""
-        a_max = self.joint.a_max
-        v_max = self.joint.v_max
 
         # Limit the boundary values for small moves
-        self.limit_bv()
-
-        self.v_0 = min(self.v_0, v_max)
-        self.v_1 = min(self.v_1, v_max)
+        self.set_bv(v_0, v_1, prior)
 
         if self.x == 0:
-            self.v_c = self.v_0 = self.v_1 = 0
+            self.v_c = 0
 
         elif self.x < 2 * self.joint.small_x:
             # The limit is the same one used for set_bv.
@@ -149,7 +145,7 @@ class ACDBlock:
 
             # self.v_0 = 0
             # self.v_1 = 0
-            self.v_c = (sqrt(4 * a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
+            self.v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
             # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
 
         else:
@@ -157,10 +153,10 @@ class ACDBlock:
             # velocities, the v_c must be v_max. In this case, it must also be true that:
             #    x_ad, t_ad = accel_acd(self.v_0, v_max, self.v_1, a_max)
             #    assert self.x > x_ad
-            self.v_c = v_max
+            self.v_c = self.joint.v_max
 
-        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
-        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, self.joint.a_max)
 
         assert round(self.x_a + self.x_d) <= self.x
 
@@ -172,6 +168,45 @@ class ACDBlock:
         assert abs(self.area - self.x) < 1, (self.x, self.area, self.t, self.v_0, self.v_1)
 
         return self
+
+    def min_time(self, v_0=None, v_1=None, prior=None):
+        """Return the smallest reasonable time to complete this block"""
+
+        self.set_bv(v_0, v_1, prior)
+
+        if self.x == 0:
+            v_c = 0
+
+        elif self.x < 2 * self.joint.small_x:
+            # The limit is the same one used for set_bv.
+            # the equation here is the sympy solution to:
+            # t_a = (v_c - v_0) / a
+            # t_d = (v_1 - v_c) / -a
+            # x_a = ((v_0 + v_c) / 2) * t_a
+            # x_d = ((v_c + v_1) / 2) * t_d
+            # x_c = x - (x_a + x_d)
+            # solve(x_c, v_c)[1]
+
+            # self.v_0 = 0
+            # self.v_1 = 0
+            v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
+            # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
+
+        else:
+            # If there is more area than the triangular profile for these boundary
+            # velocities, the v_c must be v_max. In this case, it must also be true that:
+            #    x_ad, t_ad = accel_acd(self.v_0, v_max, self.v_1, a_max)
+            #    assert self.x > x_ad
+            v_c = self.joint.v_max
+
+        x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
+
+        x_c = self.x - x_ad
+        t_c = x_c / v_c if v_c != 0 else 0
+
+        self.t = t_c + t_ad
+
+        return self.t
 
     def plan_ramp(self, t):
         """Calculate a ramp profile for a fixed time"""
@@ -218,11 +253,11 @@ class ACDBlock:
 
         return self
 
-    def plan(self, t):
+    def plan(self, t, v_0=None, v_1=None, prior=None, next=None):
 
         self.t = t
 
-        self.limit_bv()
+        self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next)
 
         a_max = self.joint.a_max
 
@@ -385,7 +420,29 @@ class ACDBlock:
 
         return pd.DataFrame(rows)
 
-    def limit_bv(self):
+    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
+
+        assert v_1 != 'prior' and v_0 != 'next'
+
+        if v_0 == 'prior' and prior is not None:
+            self.v_0 = prior.v_1
+        elif v_0 == 'v_max':
+            self.v_0 = self.joint.v_max
+        elif v_0 is not None:
+            self.v_0 = v_0
+
+        if v_1 == 'next' and next_ is not None:
+            self.v_1 = next_.v_0
+        elif v_1 == 'v_max':
+            self.v_1 = self.joint.v_max
+        elif v_1 is not None:
+            self.v_1 = v_1
+
+        if prior:
+            # If the current block has a different sign -- changes direction --
+            # then the boundary velocity must be zero.
+            if not same_sign(prior.d, self.d) or prior.x == 0 or prior.x == 0:
+                self.v_0 = 0
 
         x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
         x_d = self.x - x_a
@@ -398,6 +455,11 @@ class ACDBlock:
             self.v_1 = 0
         else:
             self.v_1 = int(min(sqrt(2 * self.joint.a_max * x_d), self.v_1))
+
+        self.v_0 = min(self.v_0, self.joint.v_max)
+        self.v_1 = min(self.v_1, self.joint.v_max)
+
+        return self.v_0, self.v_1
 
     def asdict(self):
         return asdict(self)
@@ -415,9 +477,9 @@ class ACDBlock:
             period = self.step_period
 
         return [
-            Stepper(self.d*self.x_a, self.v_0, self.v_c, period),
-            Stepper(self.d*self.x_c, self.v_c, self.v_c, period),
-            Stepper(self.d*self.x_d, self.v_c, self.v_1, period),
+            Stepper(self.d * self.x_a, self.v_0, self.v_c, period),
+            Stepper(self.d * self.x_c, self.v_c, self.v_c, period),
+            Stepper(self.d * self.x_d, self.v_c, self.v_1, period),
         ]
 
     def iter_steps(self, until_t=None, period=None):

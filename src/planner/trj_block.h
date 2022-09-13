@@ -17,12 +17,13 @@ class Block {
 
 public:
 
-    Block(trj_float_t x, Joint *joint, Segment *segment) :
+    Block(trj_float_t x, const Joint& joint, Segment *segment) :
             x(fabs(static_cast<double>(x))), joint(joint), segment(segment) {
         this->d = sign(x);
     }
 
-    Block(trj_float_t x, trj_float_t v_0, trj_float_t v_1, Joint *joint, Segment *segment) :
+
+    Block(trj_float_t x, trj_float_t v_0, trj_float_t v_1, const Joint& joint, Segment *segment) :
         Block(static_cast<double>(x), joint, segment){
         this->v_0 = v_0;
         this->v_1 = v_1;
@@ -45,7 +46,7 @@ private:
     trj_float_t v_c=0;
     trj_float_t v_1=0;
 
-    Joint *joint;
+    const Joint &joint;
     Segment *segment;
 
     int recalcs=0;

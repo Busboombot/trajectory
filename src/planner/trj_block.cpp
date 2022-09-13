@@ -95,8 +95,8 @@ trj_float_t Block::consistantize() {
 
     x_c = (int)x - (int)(x_a + x_d);
 
-    t_a = abs((v_c - v_0) / joint->a_max);
-    t_d = abs((v_c - v_1) / joint->a_max);
+    t_a = abs((v_c - v_0) / joint.a_max);
+    t_d = abs((v_c - v_1) / joint.a_max);
 
     if (round(x_c) == 0) { // get rid of small negatives
         x_c = 0;
@@ -122,17 +122,17 @@ void Block::init() {
 
     setBv(0, 0);
 
-    v_0 = fmin(v_0, joint->v_max);
-    v_1 = fmin(v_1, joint->v_max);
+    v_0 = fmin(v_0, joint.v_max);
+    v_1 = fmin(v_1, joint.v_max);
 
 
     if (x == 0) {
         v_c = v_0 = v_1 = 0;
-    } else if (x < 2. * joint->small_x) {
+    } else if (x < 2. * joint.small_x) {
 
-        v_c = (sqrt(4. * joint->a_max * x + 2. * pow(v_0, 2) + 2. * pow(v_1, 2.)) / 2.);
+        v_c = (sqrt(4. * joint.a_max * x + 2. * pow(v_0, 2) + 2. * pow(v_1, 2.)) / 2.);
     } else {
-        v_c = joint->v_max;
+        v_c = joint.v_max;
     }
 
     tie(x_a, t_a) = accel_xt(v_0, v_c);
@@ -173,14 +173,14 @@ void Block::setBv(trj_float_t v_0_, trj_float_t v_1_) {
 
 
     if (x_d_ < 0) {
-        v_0 = int(min(v_0,  sqrt(2.0 *  static_cast< double >(joint->a_max) *  static_cast< double >(x))));
+        v_0 = int(min(v_0,  sqrt(2.0 *  static_cast< double >(joint.a_max) *  static_cast< double >(x))));
 
         v_1 = 0;
     } else if (x == 0) {
         v_0 = 0;
         v_1 = 0;
     } else {
-        v_1 = int(min(sqrt(2.0 * joint->a_max * t_d_), v_1));
+        v_1 = int(min(sqrt(2.0 * joint.a_max * t_d_), v_1));
     }
 
 
@@ -195,7 +195,7 @@ tuple<trj_float_t, trj_float_t> Block::accel_xt(trj_float_t v_i, trj_float_t v_f
     }
 
 
-    trj_float_t t_ = fabs((v_f - v_i) / joint->a_max);  // Time to change from v0 to v1 at max acceleration
+    trj_float_t t_ = fabs((v_f - v_i) / joint.a_max);  // Time to change from v0 to v1 at max acceleration
     trj_float_t x_ = fabs((v_i + v_f) / 2 * t_);
 
 
@@ -258,16 +258,18 @@ void Block::plan(trj_float_t t_) {
         return;
     }
 
+
+
     // Find v_c with a binary search, then patch it up if the selection changes the segment time.
 
     auto err = [this](float v_c) {
 
-        trj_float_t err = plan_err_f(x, t, v_0, v_c, v_1, joint->a_max);
+        trj_float_t err = plan_err_f(x, t, v_0, v_c, v_1, joint.a_max);
 
         return err;
     };
 
-    v_c = fmin(binary_search(err, 0, x / t, joint->v_max), joint->v_max);
+    v_c = fmin(binary_search(err, 0, x / t, joint.v_max), joint.v_max);
 
     tie(x_a, t_a) = accel_xt(v_0, v_c);
     tie(x_d, t_d) = accel_xt(v_c, v_1);
@@ -329,20 +331,20 @@ void Block::plan_ramp(float t_) {
         t_c = t_;
     }
 
-    trj_float_t sqrt_ = joint->a_max * (joint->a_max * pow(t, 2) + 2 * t * v_0 - 2 * x);
+    trj_float_t sqrt_ = joint.a_max * (joint.a_max * pow(t, 2) + 2 * t * v_0 - 2 * x);
 
     if (sqrt_ < 0) {
-        guess = joint->a_max * t + v_0 - sqrt(sqrt_);
+        guess = joint.a_max * t + v_0 - sqrt(sqrt_);
     } else {
-        guess = fmin(x / t, joint->v_max);
+        guess = fmin(x / t, joint.v_max);
     }
 
     auto err = [this](float v_c) {
-        return plan_ramp_err_f(x, v_0, v_c, v_1, joint->a_max);
+        return plan_ramp_err_f(x, v_0, v_c, v_1, joint.a_max);
     };
 
 
-    v_1 = v_c = fmin(binary_search(err, 0, guess, joint->v_max), joint->v_max);
+    v_1 = v_c = fmin(binary_search(err, 0, guess, joint.v_max), joint.v_max);
 
     tie(x_a, t_a) = accel_xt(v_0, v_c);
 
@@ -352,20 +354,32 @@ void Block::plan_ramp(float t_) {
     consistantize();
 }
 
-string fs(trj_float_t x, trj_float_t v, trj_float_t t){
+string fs_a(trj_float_t x, trj_float_t v, trj_float_t t){
 
     std::stringstream ss;
-    ss << green << (int)(round(x)) << " " <<  blue <<  (int)(round(v)) << " " <<
-    yellow << std::setprecision(4) << t << creset;
+    ss <<
+    blue  <<  setw(5) << (int)(round(v)) << " " <<
+    green <<  setw(5) << (int)(round(x)) << " " <<
+    yellow << setw(5) <<  (int)(t*1000) << creset;
+    return ss.str();
+}
+
+string fs_d(trj_float_t x, trj_float_t v, trj_float_t t){
+
+    std::stringstream ss;
+    ss <<
+       green <<  setw(5) << (int)(round(x)) << " " <<
+       yellow << setw(5) << (int)(t*1000) << " " <<
+       blue  <<  setw(5) << (int)(round(v)) << " " << creset;
     return ss.str();
 }
 
 ostream &operator<<(ostream &output, const Block &b) {
 
     output <<  "["
-            <<  setw(30)  << fs(b.x_a, b.v_0,b.t_a) << "|"
-            <<  setw(30)  << fs(b.x_c, b.v_c,b.t_c) << "|"
-            <<  setw(30)  << fs(b.x_d, b.v_1,b.t_d) <<
+            <<  setw(48)  << fs_a(b.x_a, b.v_0,b.t_a) << "|"
+            <<  setw(48)  << fs_a(b.x_c, b.v_c,b.t_c) << "|"
+            <<  setw(48)  << fs_d(b.x_d, b.v_1,b.t_d) <<
            "] ";
 
     return output;
@@ -392,12 +406,12 @@ void Block::limitBv() {
     x_d = x - x_a;
 
     if (x_d < 0){
-        v_0 = int(fmin(v_0, sqrt(2. * joint->a_max * x)));
+        v_0 = int(fmin(v_0, sqrt(2. * joint.a_max * x)));
     } else if (x == 0) {
         v_0 = 0;
         v_1 = 0;
     } else {
-        v_1 =  int(fmin(sqrt(2. * joint->a_max * x_d), v_1));
+        v_1 =  int(fmin(sqrt(2. * joint.a_max * x_d), v_1));
     }
 
 }

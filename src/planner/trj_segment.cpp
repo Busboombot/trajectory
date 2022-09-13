@@ -11,16 +11,15 @@ ostream &operator<<(ostream &output, const Segment &s) {
         output << b;
     }
 
-    output << endl;
     return output;
 }
 
-Segment::Segment(const std::vector<Joint>&  joints, MoveArray move ) :
-        n(0), t(0), joints(joints), moves(std::move(move)) {
+Segment::Segment(uint32_t n, const std::vector<Joint>&  joints, MoveArray move ) :
+        n(n), t(0), joints(joints), moves(std::move(move)) {
 
     int axis_n = 0;
-    for (Joint &joint: this->joints) {
-        blocks.emplace_back(this->moves[axis_n], &joint, this);
+    for (const Joint &joint: this->joints) {
+        blocks.emplace_back(this->moves[axis_n], joint, this);
         blocks.back().init();
         axis_n++;
     }
@@ -29,7 +28,7 @@ Segment::Segment(const std::vector<Joint>&  joints, MoveArray move ) :
 
 }
 
-Segment::Segment(const std::vector<Joint>&  joints, const Move& move ) : Segment(joints, move.x ){
+Segment::Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move ) : Segment(n, joints, move.x ){
 
 }
 
@@ -87,7 +86,7 @@ MoveType Segment::getMoveType() const {
 
 VelocityVector Segment::getV0() {
 
-    VelocityVector vv(n_joints);
+    VelocityVector vv;
 
     for (Block &b: this->blocks) {
         vv.push_back(b.getV0());
@@ -98,7 +97,7 @@ VelocityVector Segment::getV0() {
 
 VelocityVector Segment::getV1() {
 
-    VelocityVector vv(n_joints);
+    VelocityVector vv;
 
     for (Block &b: this->blocks) {
         vv.push_back(b.getV1());

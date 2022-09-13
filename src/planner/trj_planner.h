@@ -42,6 +42,7 @@ protected:
 
     int32_t queue_size=0;
     int32_t queue_time=0;
+    int32_t seg_num = 0;
     MoveArray current_position;
 
 public:
@@ -56,9 +57,12 @@ public:
 
     bool isEmpty();
 
+
+
 public:
 
-    VelocityVector V_NAN; // Vector of Nans, for skipping args in setBv
+    // Fpr passing in to set_bv for boundaries you don't want to change.
+    VelocityVector V_NAN = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN};
 
     // Reset the joints
     void setNJoints(int n_joints);
@@ -91,7 +95,7 @@ private:
 
     double boundary_error(Segment &p, Segment &c);
 
-    int plan_at_boundary(Segment &a, Segment &b);
+    int plan_at_boundary(Segment &prior, Segment &current);
 
     
 

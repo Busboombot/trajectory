@@ -14,7 +14,7 @@ TEST_CASE("Basic Segment and Block test", "[planner]")
 {
     Joint j(0, 5e3, 50e3);
 
-    Segment s({j, j}, {5000, 1000});
+    Segment s(0,{j, j}, {5000, 1000});
 
     std::cout << s << std::endl;
 

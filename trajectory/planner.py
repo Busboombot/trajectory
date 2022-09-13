@@ -36,7 +36,8 @@ from typing import List
 
 import pandas as pd
 
-from .gsolver import Joint, ACDBlock, same_sign
+from .gsolver import Joint, ACDBlock
+
 
 def index_clip(n, l):
     """Clip the indexer to an list to a valid range"""
@@ -49,54 +50,59 @@ class Segment(object):
     n: int = None
     t: float = 0
     blocks: "List[ACDBlock]" = None
+    joints: List[Joint] = None
     prior: "Segment" = None
 
     replans: int = 0
 
-    def __init__(self, n, blocks: List[ACDBlock], prior: "Segment" = None):
+    def __init__(self, n, move: List[int], joints: List[Joint], prior: "Segment" = None):
 
         self.n = n
-        self.blocks = blocks
+        self.joints = joints
+
+        if prior is not None:
+            self.prior = prior
+            self.blocks = [j.new_block(x=x, v_0=pb.v_1, v_1=0) for j, x, pb in zip(self.joints, move, prior.blocks)]
+        else:
+            self.blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, move )]
 
         for b in self.blocks:
             b.segment = self
 
-        if prior is not None:
-            self.prior = prior
 
-    def init(self):
+
+    def init(self, v_0=None, v_1=None, prior=None):
         """Re-initialize all of the blocks"""
-        for b in self:
-            b.init()
+
+        if prior is not None:
+            for prior, current in zip(prior.blocks, self.blocks):
+                current.init(v_0=v_0, v_1=v_1, prior=prior)
+        else:
+            for b in self.blocks:
+                b.init(v_0=v_0, v_1=v_1)
 
         return self
 
-    def set_bv(self, v_0=None, v_1=None):
-        if hasattr(v_0, "__len__"):
-            for b, v in zip(self.blocks, v_0):
-                b.v_0 = v
-        elif v_0 is not None:
-            for b in self.blocks:
-                b.v_0 = v_0
-
-        if hasattr(v_1, "__len__"):
-            for b, v in zip(self.blocks, v_1):
-                b.v_1 = v
-        elif v_1 is not None:
-            for b in self.blocks:
-                b.v_1 = v_1
+    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
 
         for b in self.blocks:
-            b.limit_bv()
+            b.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
-    def plan(self):
+        return self
 
-        mt = max(self.times)
 
-        for b in self:
-            b.plan(mt)
+    def plan(self, v_0=None, v_1=None, prior=None, next_=None):
 
-        return self.times_e_rms;
+        mt = self.min_time
+
+        for i, b in enumerate(self.blocks):
+
+            pb = prior.blocks[i] if prior is not None else None
+            nb = next_.blocks[i] if next_ is not None else None
+
+            b.plan(mt, v_0, v_1, pb, nb)
+
+        return self # self.times_e_rms;
 
     def plan_ramp(self, v_0=None):
 
@@ -127,6 +133,11 @@ class Segment(object):
         return max(self.times)
 
     @property
+    def min_time(self):
+        """Calculated maximum of the  minimum time for each block in the segment"""
+        return max([b.min_time() for b in  self.blocks])
+
+    @property
     def times_e_rms(self):
         """Compute the RMS difference of the times from the mean time"""
         import numpy as np
@@ -151,7 +162,7 @@ class Segment(object):
 
     def __str__(self):
 
-        return f"{self.t:>3.4f}|" + ' '.join(js.str() for js in self.blocks)
+        return f"{self.time:>3.4f}|" + ' '.join(js.str() for js in self.blocks)
 
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
@@ -172,9 +183,17 @@ class Segment(object):
             if t > end_time:
                 break
 
+    @property
+    def dataframe(self):
+        frames = []
+        for i, b in enumerate(self.blocks):
+            frames.append(b.dataframe.assign(seg=self.n, axis=i))
+
+        return pd.concat(frames)
+
     def plot(self, ax=None):
-        from .plot import plot_params
-        plot_params(self.blocks, ax=ax)
+        from .plot import plot_trajectory
+        plot_trajectory(self.dataframe, ax=ax)
 
 
 class SegmentList(object):
@@ -201,50 +220,21 @@ class SegmentList(object):
 
         assert len(x) == len(self.joints)
 
-        blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, x, )]
-
         prior = self.segments[-1] if len(self.segments) > 0 else None
 
-        s = Segment(len(self.segments), blocks, prior)
-
-        s.init()
+        s = Segment(len(self.segments), x, self.joints, prior)
 
         self.segments.append(s)
 
-        self.plan()
+        if prior is not None:
+            prior.plan()
+            s.plan(v_0='prior', v_1=0, prior=prior)
+        else:
+            s.plan(v_0=0, v_1=0, prior=prior)
+
+        #self.plan()
 
         return s
-
-    def plan_at_boundary(self, a, b):
-        """Plan two segments, the current and immediately prior, to
-        get a consistent set of boundary velocities between them """
-
-        a_v0 = a.v_0
-
-
-        # If the current block has a different sing -- changes direction --
-        # then the boundary velocity must be zero.
-        for ab, bb in zip(a.blocks, b.blocks):
-            if not same_sign(ab.d, bb.d) or ab.x == 0 or bb.x == 0:
-                ab.v_1 = 0
-
-        a.plan()  # Plan a first
-        b.set_bv(v_0=a.v_1)
-        b.plan()  # Plan b with maybe changed velocities from a
-
-        if b.v_0 != a.v_1:
-            # This means that the current could not handle the commanded v_0,
-            # so prior will have to yield.
-            a.set_bv(v_1=b.v_0)
-            a.plan()
-
-        be = self.boundary_error(a, b)
-
-        if a_v0 != a.v_0 or be > 1:
-            # Planning segment a changed it's v_0, so we need to o back one earlier
-            return -1
-        else:
-            return 1
 
     def plan(self):
         """Plan the newest segment, and the one prior. If there are boundary
@@ -254,13 +244,10 @@ class SegmentList(object):
         current = self.segments[i]
 
         if i == 0:
-            current.plan()
+            current.plan(0,0)
             return
 
-        prior = self.segments[i - 1]
-        prior.plan_ramp()  # Uncap the v_1 for the prior tail
-
-        for _ in range(20):
+        for p_idx in range(20):
             # For random moves, only about 10% of the segments will have more than 2
             # iterations, and 1% more than 10.
 
@@ -274,11 +261,35 @@ class SegmentList(object):
 
             i += inc_index
 
-            if i == 0:
+            if i < 0:
                 # Hit the beginning, so need to go forward
-                i += 2
+                i = 1
 
         return
+
+    def plan_at_boundary(self, prior, current):
+        """Plan two segments, the current and immediately prior, to
+        get a consistent set of boundary velocities between them """
+
+        a_v0 = prior.v_0
+
+        prior.plan()  # Plan a first
+        current.plan(v_0='prior', prior=prior)  # Plan b with maybe changed velocities from a
+
+        if current.v_0 != prior.v_1:
+            # This means that the current could not handle the commanded v_0,
+            # so prior will have to yield.
+
+            prior.plan(v_1='next',next_=current)
+
+        be = self.boundary_error(prior, current)
+
+        if a_v0 != prior.v_0 or be > 1:
+            # Planning segment a changed it's v_0, so we need to o back one earlier
+            return -1
+        else:
+            return 1
+
 
     def boundary_error(self, p, c):
         sq_err = 0

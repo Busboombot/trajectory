@@ -24,20 +24,20 @@ class Segment {
 
 private:
 
-    int n;
-    double t{};
+    uint32_t n;
+    trj_float_t t;
     MoveType moveType = MoveType::none;
 
     vector<Block> blocks;
-    vector<Joint> joints;
+    const vector<Joint>& joints;
     MoveArray moves;
 
     u_long n_joints;
 
 public:
 
-    Segment(const std::vector<Joint>&  joints, MoveArray moveS );
-    Segment(const std::vector<Joint>&  joints, const Move& move );
+    Segment(uint32_t n, const std::vector<Joint>&  joints, MoveArray moveS );
+    Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move );
 
     void plan();
 
@@ -59,6 +59,9 @@ public:
 
     VelocityVector getV0();
     VelocityVector getV1();
+
+    int getN() const { return n; }
+
 
 
     friend Planner;

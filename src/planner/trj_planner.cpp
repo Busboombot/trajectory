@@ -27,6 +27,7 @@ Planner::Planner(std::vector<Joint> joints_) {
         j.n = i++;
         setJoint(j);
     }
+
 }
 
 
@@ -35,47 +36,44 @@ void Planner::move(const Move &move) {
 }
 
 void Planner::move(const MoveArray &move) {
-    segments.emplace_back(joints, move);
+    segments.emplace_back(seg_num, joints, move);
+
 
     plan();
 
+    seg_num++;
 }
 
 void Planner::plan(){
     // Plan the newest segment, and the one prior. If there are boundary
     // velocity discontinuities, also plan earlier segments
 
-
     u_long i = segments.size() - 1;
-    Segment& current = segments[i];
-
-    cout << "Plan " << i << endl;
+    Segment* current = &segments[i];
 
     if (i == 0) {
-        current.plan();
+        current->plan();
         return;
     }
 
-
-    Segment& prior = segments[i - 1];
-    prior.plan_ramp();  // Uncap the v_1 for the prior tail
-
-
-    return ;
+    Segment* prior = &segments[i - 1];
+    prior->plan_ramp();  // Uncap the v_1 for the prior tail
 
 
-    for(int n = 0; n < 20; n++){
+    for(int p_iter = 0; p_iter < 20; p_iter++){
         // For random moves, only about 10% of the segments will have more than 2
         // iterations, and 1% more than 10.
+
+        cout << "Plan " << i << " " << p_iter << " seg=" <<  current->getN() << endl;
 
         if (i >= segments.size() ){
             break;
         }
 
-        current = segments[i];
-        prior = segments[i - 1];
+        current = &segments[i];
+        prior = &segments[i - 1];
 
-        i += plan_at_boundary(prior, current);
+        i += plan_at_boundary(*prior, *current);
 
         if (i == 0){
             // Hit the beginning, so need to go forward
@@ -84,29 +82,46 @@ void Planner::plan(){
     }
 
 }
-int Planner::plan_at_boundary(Segment &a, Segment &b) {
+int Planner::plan_at_boundary(Segment &prior, Segment &current) {
     // Plan two segments, the current and immediately prior, to
-    // get a consistent set of boundary velocities between them
+    // get prior consistent set of boundary velocities between them
 
-    VelocityVector a_v0 = a.getV0();
+    VelocityVector a_v0 = prior.getV0();
 
     for(int i = 0; i < joints.size(); i++){
-        a.blocks[i].limitBv(b.blocks[i]);
+        prior.blocks[i].limitBv(current.blocks[i]);
     }
 
-    a.plan();
-    b.setBv(a.getV1(), V_NAN);
-    b.plan() ;
+    cout <<endl<< "Plan@B " << prior.getN() << " " << current.getN() << endl;
 
-    if (b.getV0() != a.getV1()) {
+    cout << "A  P " << prior << endl;
+    cout << "A  C " << current << endl;
+
+    prior.plan();
+
+    current.setBv(prior.getV1(), V_NAN);
+    current.plan() ;
+
+
+    cout << "B  P " << prior << endl;
+    cout << "B  C " << current << endl;
+
+
+    if (current.getV0() != prior.getV1()) {
         // This means that the current could not handle the commanded v_0,
         // so prior will have to yield.
-        a.setBv(V_NAN, b.getV0());
-        a.plan();
+        prior.setBv(V_NAN, current.getV0());
+        prior.plan();
     }
 
-    if (a_v0 != a.getV0() || boundary_error(a, b) > 1) {
-        // Planning segment a changed it's v_0, so we need to o back one earlier
+
+    cout << "C  P " << prior << endl;
+    cout << "C  C " << current << endl;
+
+
+
+    if (a_v0 != prior.getV0() || boundary_error(prior, current) > 1) {
+        // Planning segment prior changed it's v_0, so we need to o back one earlier
         return -1;
     } else {
         return 1;
@@ -158,7 +173,7 @@ ostream &operator<<(ostream &output, const Planner &p) {
     cout << endl << blue_bg << "════ Segments ════" << creset << endl;
 
     for (const Segment& s: p.segments) {
-        output << s;
+        output << s << endl;
     }
 
 

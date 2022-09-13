@@ -8,6 +8,8 @@
 #include <chrono>
 #include <stdexcept>
 
+#include "trj_types.h"
+
 typedef std::chrono::milliseconds ms;
 typedef std::chrono::microseconds us;
 typedef std::chrono::steady_clock steadyClock;
@@ -39,6 +41,7 @@ template <typename T> int sgn(T val) {
 
 bool same_sign(float a, float b);
 int sign(int a);
+int sign(trj_float_t a);
 
 // To convert class enums to ints. 
 //template <typename E>
@@ -48,10 +51,11 @@ int sign(int a);
 
 std::vector<std::string> splitString(const std::string& str);
 
-void hello();
 
+// ANSI colors
 extern std::string yellow;
 extern std::string green;
 extern std::string blue;
 extern std::string blue_bg;
 extern std::string creset;
+

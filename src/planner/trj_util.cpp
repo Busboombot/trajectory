@@ -17,6 +17,13 @@ int sign(int x) {
     else return -1;
 }
 
+int sign(trj_float_t x) {
+    if (x == 0) return 0;
+    else if  (x > 0) return 1;
+    else return -1;
+}
+
+
 #ifdef TRJ_ENV_HOST
 void delay(uint32_t ms){
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -64,12 +71,11 @@ std::vector<std::string> splitString(const std::string& str){
 }
 
 
-void hello(){
-    std::cout << "Hello from the trajectory planner" << std::endl;
-}
-
 std::string yellow = col::make(col::yellow, col::def, false, false, false);
 std::string green  = col::make(col::green,  col::def, false, false, false);
 std::string blue  = col::make(col::blue,  col::def, false, false, false);
 std::string blue_bg  = col::make(col::blue,  col::def, true, false, false);
 std::string creset = "\x1b[0m";
+
+
+
