@@ -94,8 +94,6 @@ class Segment(object):
 
     def plan(self, v_0=None, v_1=None, prior=None, next_=None, z=None):
 
-        last_err = 0
-
         # Planning can change the time for a block, so planning multiple
         # will ( should ) converge on a singe segment time.
 
@@ -110,14 +108,10 @@ class Segment(object):
 
                 b.plan(mt, v_0, v_1, pb, nb)
 
-            next_error = self.times_e_rms
-            if next_error < .001:
+            if self.times_e_rms < .001:
                 break
 
-            last_err = next_error
-
         return self
-
 
     @property
     def v_0(self):
@@ -240,7 +234,7 @@ class SegmentList(object):
         # Linear ( hopefully ) re-plan of the last few segments. This will
         # finish up straightening bumps and removing discontinuities.
         if len(self.segments) >= 2:
-            n = index_clip(-4, self.segments) # Replan at most last 4 elements all the way through
+            n = index_clip(-5, self.segments) # Replan at most last 4 elements all the way through
             n = max(1, n) #Replnning the first one unmoors v_0
             self.plan(n)
 
@@ -248,8 +242,6 @@ class SegmentList(object):
 
         if i is None:
             i = len(self.segments) - 1
-
-
 
         for p_idx in range(15):
 
@@ -262,20 +254,22 @@ class SegmentList(object):
 
             # Smooth out boundary bumps between segments.
             def v_limit(p_idx, v_max):
-                if p_idx == 0:
+                if p_idx  == 0:
                     return v_max
-                elif p_idx < 3:
+                elif p_idx < 2:
                     return v_max/4
                 else:
                     return 0;
+
+            bends = 0
             for p, n in zip(prior.blocks, current.blocks):
                 if bent(p, n):
                     diff = abs(p.v_1-mean_bv(p, n))
                     if diff < v_limit(p_idx, p.joint.v_max):
                         p.v_1 = n.v_0 = mean_bv(p, n)
+                        bends += 1
 
-
-            if pre_prior is not None and self.boundary_error(pre_prior, prior):
+            if bends or (pre_prior is not None and self.boundary_error(pre_prior, prior)):
                 i += -1  # Run it again one segment earlier
             elif self.boundary_error(prior, current):
                 # This means that the current could not handle the commanded v_0,
