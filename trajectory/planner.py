@@ -36,13 +36,17 @@ from typing import List
 
 import pandas as pd
 
-from .gsolver import Joint, ACDBlock
+from .gsolver import Joint, ACDBlock, bent, mean_bv
 
 
 def index_clip(n, l):
     """Clip the indexer to an list to a valid range"""
-    return max(-len(l), min(n, len(l) - 1))
+    n = max(-len(l), min(n, len(l) - 1))
 
+    if n < 0:
+        n = len(l) + n
+
+    return n
 
 class Segment(object):
     """One segment, for all joints"""
@@ -88,15 +92,17 @@ class Segment(object):
 
         return self
 
-    def plan(self, v_0=None, v_1=None, prior=None, next_=None):
+    def plan(self, v_0=None, v_1=None, prior=None, next_=None, z=None):
 
         last_err = 0
 
         # Planning can change the time for a block, so planning multiple
         # will ( should ) converge on a singe segment time.
 
-        for p_iter in range(3):
-            mt = self.min_time
+        self.min_time
+
+        for p_iter in range(10):
+            mt = self.time
 
             for i, b in enumerate(self.blocks):
                 pb = prior.blocks[i] if prior is not None else None
@@ -104,24 +110,14 @@ class Segment(object):
 
                 b.plan(mt, v_0, v_1, pb, nb)
 
-            if round(last_err - self.times_e_rms, 5) == 0:
+            next_error = self.times_e_rms
+            if next_error < .001:
                 break
 
-            last_err = self.times_e_rms
+            last_err = next_error
 
         return self
 
-    def plan_ramp(self, v_0=None):
-
-        for b in self.blocks:
-            b.v_1 = b.joint.v_max
-
-        mt = max(self.times)
-
-        for b in self:
-            b.plan_ramp(mt)
-
-        return self.times_e_rms;
 
     @property
     def v_0(self):
@@ -159,6 +155,7 @@ class Segment(object):
 
         s = sum(times)
         m = s / len(times)
+
         return np.sqrt(np.sum([(t - m) ** 2 for t in times]))
 
     def __iter__(self):
@@ -239,34 +236,52 @@ class SegmentList(object):
             prior.plan(v_1='v_max')
             s.plan(v_0='prior', v_1=0, prior=prior)
 
+            self.plan(len(self.segments) - 1)
+
+        if len(self.segments) >= 2:
+            n = index_clip(-4, self.segments) # Replan at most last 4 elements all the way through
+            n = max(1, n) #Replnning the first one unmoors v_0
+            self.plan(n)
+
+    def plan(self, i: int = None, remove_bumps=False):
+        from trajectory.gsolver import bent
+
+        if i is None:
             i = len(self.segments) - 1
 
-            for p_idx in range(15):
-                current = self.segments[i]
-                prior = self.segments[i - 1]
-                pre_prior = self.segments[i - 2] if i >= 2 else None
+        for p_idx in range(15):
 
-                prior.plan(v_1='next', next_=current)  # Plan a first
-                current.plan(v_0='prior', prior=prior)  # Plan b with maybe changed velocities from a
+            current = self.segments[i]
+            prior = self.segments[i - 1]
+            pre_prior = self.segments[i - 2] if i >= 2 else None
 
-                if pre_prior is not None and self.boundary_error(pre_prior, prior):
-                    i += -1  # Run it again one segment earlier
-                elif self.boundary_error(prior, current):
-                    # This means that the current could not handle the commanded v_0,
-                    # so prior will have to yield.
-                    i += 0  # Re-run planning on this boundary
-                else:
-                    i += 1  # Advance to the next segment
+            prior.plan(v_1='next', next_=current)  # Plan a first
+            current.plan(v_0='prior', prior=prior,)  # Plan b with maybe changed velocities from a
 
-                i = max(0, i)
+            # Smooth out boundary bums between segments.
+            for p, n in zip(prior.blocks, current.blocks):
+                if bent(p, n):
+                    p.v_1 = n.v_0 = mean_bv(p, n)
 
-                if i >= len(self.segments):
-                    break
 
-            self.replans.append(p_idx)
+            if pre_prior is not None and self.boundary_error(pre_prior, prior):
+                i += -1  # Run it again one segment earlier
+            elif self.boundary_error(prior, current):
+                # This means that the current could not handle the commanded v_0,
+                # so prior will have to yield.
+                i += 0  # Re-run planning on this boundary
+            else:
+                i += 1  # Advance to the next segment
+
+            i = max(0, i)
+
+            if i >= len(self.segments):
+                break
+
+        self.replans.append(p_idx)
+
 
     def boundary_error(self, p, c):
-
         return math.sqrt(sum([(pb.v_1 - cb.v_0) ** 2 for pb, cb in zip(p.blocks, c.blocks)]))
 
     @property
@@ -280,6 +295,13 @@ class SegmentList(object):
         for s in self.segments:
             for b in s.blocks:
                 yield b
+
+    @property
+    def block_pairs(self):
+        for p, n in self.pairs:
+            for pb, nb in zip(p.blocks, n.blocks):
+                yield(pb, nb)
+
 
     def discontinuities(self, index=0):
         """Yield segment pairs with velocity discontinuities"""

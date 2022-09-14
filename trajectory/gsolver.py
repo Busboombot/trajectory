@@ -3,7 +3,7 @@ from math import sqrt
 
 import pandas as pd
 
-from .exceptions import TrapMathError, ConvergenceError
+from .exceptions import TrapMathError
 from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
 
 
@@ -64,6 +64,26 @@ def sign(x):
 
 def same_sign(a, b):
     return int(a) == 0 or int(b) == 0 or sign(a) == sign(b)
+
+def mean_bv( prior, next_):
+
+    if prior.t_d + next_.t_a != 0:
+        a = (next_.v_c - prior.v_c) / (prior.t_d + next_.t_a)
+    else:
+        return (next_.v_c + prior.v_c) / 2
+
+    v = prior.v_c + a * prior.t_d
+
+    return v
+
+def bent(prior, current):
+    cd = current.d
+    pd = prior.d
+
+    s1 = sign(pd * prior.v_c - pd * prior.v_1)
+    s2 = sign(cd * current.v_0 - cd * current.v_c)
+
+    return s1 * s2 < 0
 
 
 @dataclass
@@ -143,10 +163,7 @@ class ACDBlock:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
-            # self.v_0 = 0
-            # self.v_1 = 0
             self.v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-            # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
 
         else:
             # If there is more area than the triangular profile for these boundary
@@ -172,7 +189,7 @@ class ACDBlock:
     def min_time(self, v_0=None, v_1=None, prior=None):
         """Return the smallest reasonable time to complete this block"""
 
-        self.set_bv(v_0, v_1, prior)
+        # self.set_bv(v_0, v_1, prior)
 
         if self.x == 0:
             v_c = 0
@@ -187,10 +204,7 @@ class ACDBlock:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
-            # self.v_0 = 0
-            # self.v_1 = 0
             v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-            # self.v_c = min(self.v_c, v_max)  # formula errs for short segments
 
         else:
             # If there is more area than the triangular profile for these boundary
@@ -208,56 +222,11 @@ class ACDBlock:
 
         return self.t
 
-    def plan_ramp(self, t):
-        """Calculate a ramp profile for a fixed time"""
-
-        self.t = t
-        a_max = self.joint.a_max
-
-        if self.x == 0 or self.t == 0:
-            self.set_zero()
-            self.t_c = self.t = t
-            return self
-
-        # Run the binary search anyway, just in case.
-        def err(v_c):
-            x_a, t_a = accel_xt(self.v_0, v_c, self.joint.a_max)
-            t_c = self.t - t_a
-
-            x_c = v_c * t_c
-            x_err = self.x - (x_a + x_c)
-
-            return x_err
-
-        try:
-            guess = a_max * t + self.v_0 - sqrt(a_max * (a_max * t ** 2 + 2 * t * self.v_0 - 2 * self.x))
-            guess_flag = 'c'
-        except ValueError:
-            guess = min(self.x / self.t, self.joint.v_max)
-            guess_flag = 'm'
-
-        try:
-            self.v_1 = self.v_c = min(binary_search(err, 0, guess, self.joint.v_max), self.joint.v_max)
-        except TypeError:
-            assert False, ('Binary search failed', (guess, guess_flag, self.x, self.t, self.v_0))
-
-        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
-
-        self.t_d, self.x_d = 0, 0
-
-        self.consistantize()
-
-        assert self.v_0 <= self.joint.v_max
-        assert self.v_c <= self.joint.v_max, self.v_c
-        assert self.v_1 <= self.joint.v_max
-
-        return self
-
-    def plan(self, t, v_0=None, v_1=None, prior=None, next=None):
+    def _plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
 
         self.t = t
 
-        self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next)
+        self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
         a_max = self.joint.a_max
 
@@ -270,7 +239,6 @@ class ACDBlock:
         # selection changes the segment time.
 
         def err(v_c):
-
             x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
 
             t_c = max(self.t - t_ad, 0)
@@ -278,65 +246,73 @@ class ACDBlock:
 
             return self.x - (x_ad + x_c)
 
-        self.v_c = min(binary_search(err, 0,
-                                     self.x / self.t, self.joint.v_max), self.joint.v_max)
+        v_c = binary_search(err, 0, self.x / self.t, self.joint.v_max)
 
-        assert self.v_c <= self.joint.v_max
+        self.v_c = min(v_c, self.joint.v_max)
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
         self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
 
         # consistantize will make all of the values consistent with each other,
         # and if anything is wrong, it will show up in a negative x_c
+        self.consistantize()
 
-        x_c = self.consistantize()
-
-        x_err = abs(round(self.area) - self.x)
-
-        if round(x_c) < 0 or (self.x > 25 and x_err > 1):
-            # We've probably got a really small move, and we've already tried
-            # reducing boundary velocities, so get more aggressive. If that
-            # doesn't work, allow the time to expand.
-
-            new_t = max(self.t_a + self.t_d, self.t)
-
-            if self.v_1 > 0:
-                self.v_1 = 0
-                return self.plan(t)
-
-            elif self.v_0 > 0:
-                self.v_0 = 0
-                return self.plan(t)
-
-            elif abs(new_t - self.t) > 0.0005:
-
-                return self.plan(t)
-            else:
-                raise ConvergenceError(
-                    'Unsolvable profile, incorrect area: '
-                    f'x_c={x_c} x_err={x_err} x={self.x}, x_ad={self.x_a + self.x_d} t={self.t} t_ad={self.t_a + self.t_d}')
-
-        if round(t, 3) != round(self.t, 3):
-            # This block is still too long.
-            if self.v_1 != 0:
-                self.v_1 = 0
-                return self.plan(t)
-            elif round(self.v_0) > 0:
-                self.v_0 = self.v_0 / 2
-                return self.plan(t)
-            else:
-                pass
-
-        assert round(self.x_a + self.x_d) <= self.x
-        # assert self.t_a + self.t_d <= self.t
+        assert self.t > 0
+        assert self.v_c <= self.joint.v_max
         assert self.v_c >= 0, self.v_c
         assert abs(self.area - self.x) < 2, (self.area, self)
-        assert self.t > 0
+        assert round(self.x_a + self.x_d) <= self.x
         assert self.v_0 <= self.joint.v_max
         assert self.v_c <= self.joint.v_max
         assert self.v_1 <= self.joint.v_max
 
         return self
+
+    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
+
+        self._plan(t, v_0=v_0, v_1=v_1, prior=prior, next_=next_)
+
+        def has_error(b):
+            x_err = abs(round(b.area) - b.x)
+            return round(b.x_c) < 0 or (b.x > 25 and x_err > 1) or round(t, 3) != round(b.t, 3)
+
+        if not has_error(self):
+            return self
+
+        # Try various strategies to fix the errors
+
+        # Reduce v_1 a bit
+        while self.v_1 > 1500:
+            self.v_1 = int(self.v_1 / 2)
+            self._plan(t, prior=prior, next_=next_)
+            if not has_error(self):
+                return self
+
+        # Maybe it just needs a re-calc to allow time to expand?
+        self._plan(self.t, prior=prior, next_=next_)
+        if not has_error(self):
+            return self
+
+        # Reduce v_0 to v_c
+        if self.v_0 > self.v_c:
+            self.v_0 = self.v_c
+            self._plan(t, prior=prior, next_=next_)
+            if not has_error(self):
+                return self
+
+        # Finish off reducing v_1
+        while self.v_1 > 1:
+            self.v_1 = int(self.v_1 / 2)
+            self._plan(t, prior=prior, next_=next_)
+            if not has_error(self):
+                return self
+
+        # Finish off reducing v_0
+        while self.v_0 > 1:
+            self.v_0 = int(self.v_0 / 2)
+            self._plan(t, prior=prior, next_=next_)
+            if not has_error(self):
+                return self
 
     def consistantize(self, return_error=False):
         """Recalculate t to make x and v values integers, and everything more consistent
@@ -406,6 +382,8 @@ class ACDBlock:
         self.t_a = self.t_d = self.t_c = 0
         self.v_0 = self.v_c = self.v_1 = 0
 
+
+
     @property
     def dataframe(self):
 
@@ -424,14 +402,14 @@ class ACDBlock:
 
         assert v_1 != 'prior' and v_0 != 'next'
 
-        if v_0 == 'prior' and prior is not None:
+        if (v_0 == 'prior' or v_0 == 'mean') and prior is not None:
             self.v_0 = prior.v_1
         elif v_0 == 'v_max':
             self.v_0 = self.joint.v_max
         elif v_0 is not None:
             self.v_0 = v_0
 
-        if v_1 == 'next' and next_ is not None:
+        if (v_1 == 'next' or v_1 == 'mean') and next_ is not None:
             self.v_1 = next_.v_0
         elif v_1 == 'v_max':
             self.v_1 = self.joint.v_max
@@ -441,7 +419,7 @@ class ACDBlock:
         if prior:
             # If the current block has a different sign -- changes direction --
             # then the boundary velocity must be zero.
-            if not same_sign(prior.d, self.d) or prior.x == 0 or prior.x == 0:
+            if not same_sign(prior.d, self.d) or prior.x == 0 or self.x == 0:
                 self.v_0 = 0
 
         x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
@@ -455,6 +433,32 @@ class ACDBlock:
             self.v_1 = 0
         else:
             self.v_1 = int(min(sqrt(2 * self.joint.a_max * x_d), self.v_1))
+
+        # Get rid of kinks at the boundary, where the v_1/v_0 values
+        # are much different from the v_c values of the adjacent blocks, and
+        # the v_c blocks are similar.
+        #
+        # So, change ___/\___ into ------
+        #
+        # We can reduce v_1/v_0 to match v_c without much concern, but
+        # should generally not increase the boundary velocity, so
+        # there is a limit on the size of increases.
+
+        if v_0 == 'mean' and prior is not None and bent(prior, self):
+            v = mean_bv(prior, self)
+            if v <= self.v_0 and v <= prior.v_1:
+                self.v_0 = v
+            elif max(abs(self.v_0 - v), abs(prior.v_1 - v)) < 2000:
+                self.v_0 = v
+
+
+        if v_1 == 'mean' and next_ is not None and bent(self, next_):
+            v = mean_bv(self, next_)
+            if v <= self.v_1 and v <= next_.v_0:
+                self.v_1 = v
+            elif max(abs(self.v_1 - v), abs(next_.v_0 - v)) < 2000:
+                self.v_1 = v
+
 
         self.v_0 = min(self.v_0, self.joint.v_max)
         self.v_1 = min(self.v_1, self.joint.v_max)

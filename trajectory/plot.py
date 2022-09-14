@@ -45,7 +45,7 @@ def plot_axis(df, axis, ax=None):
 
     t = pd.DataFrame(list(_f())).set_index('t')
 
-    ax = t[['v']].plot(ax=ax, marker='+')
+    ax = t[['v']].plot(ax=ax)
 
     for t, row in t.iterrows():
         # rectangle = plt.Rectangle((idx,0), row.del_t, row.v_f, fc=cm[row.ss], alpha=0.05)
