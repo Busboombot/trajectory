@@ -235,19 +235,21 @@ class SegmentList(object):
         else:
             prior.plan(v_1='v_max')
             s.plan(v_0='prior', v_1=0, prior=prior)
-
             self.plan(len(self.segments) - 1)
 
+        # Linear ( hopefully ) re-plan of the last few segments. This will
+        # finish up straightening bumps and removing discontinuities.
         if len(self.segments) >= 2:
             n = index_clip(-4, self.segments) # Replan at most last 4 elements all the way through
             n = max(1, n) #Replnning the first one unmoors v_0
             self.plan(n)
 
     def plan(self, i: int = None, remove_bumps=False):
-        from trajectory.gsolver import bent
 
         if i is None:
             i = len(self.segments) - 1
+
+
 
         for p_idx in range(15):
 
@@ -258,10 +260,19 @@ class SegmentList(object):
             prior.plan(v_1='next', next_=current)  # Plan a first
             current.plan(v_0='prior', prior=prior,)  # Plan b with maybe changed velocities from a
 
-            # Smooth out boundary bums between segments.
+            # Smooth out boundary bumps between segments.
+            def v_limit(p_idx, v_max):
+                if p_idx == 0:
+                    return v_max
+                elif p_idx < 3:
+                    return v_max/4
+                else:
+                    return 0;
             for p, n in zip(prior.blocks, current.blocks):
                 if bent(p, n):
-                    p.v_1 = n.v_0 = mean_bv(p, n)
+                    diff = abs(p.v_1-mean_bv(p, n))
+                    if diff < v_limit(p_idx, p.joint.v_max):
+                        p.v_1 = n.v_0 = mean_bv(p, n)
 
 
             if pre_prior is not None and self.boundary_error(pre_prior, prior):
@@ -279,7 +290,6 @@ class SegmentList(object):
                 break
 
         self.replans.append(p_idx)
-
 
     def boundary_error(self, p, c):
         return math.sqrt(sum([(pb.v_1 - cb.v_0) ** 2 for pb, cb in zip(p.blocks, c.blocks)]))
@@ -301,7 +311,6 @@ class SegmentList(object):
         for p, n in self.pairs:
             for pb, nb in zip(p.blocks, n.blocks):
                 yield(pb, nb)
-
 
     def discontinuities(self, index=0):
         """Yield segment pairs with velocity discontinuities"""

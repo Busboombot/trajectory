@@ -402,14 +402,14 @@ class ACDBlock:
 
         assert v_1 != 'prior' and v_0 != 'next'
 
-        if (v_0 == 'prior' or v_0 == 'mean') and prior is not None:
+        if v_0 == 'prior' and prior is not None:
             self.v_0 = prior.v_1
         elif v_0 == 'v_max':
             self.v_0 = self.joint.v_max
         elif v_0 is not None:
             self.v_0 = v_0
 
-        if (v_1 == 'next' or v_1 == 'mean') and next_ is not None:
+        if v_1 == 'next' and next_ is not None:
             self.v_1 = next_.v_0
         elif v_1 == 'v_max':
             self.v_1 = self.joint.v_max
@@ -432,33 +432,7 @@ class ACDBlock:
             self.v_0 = 0
             self.v_1 = 0
         else:
-            self.v_1 = int(min(sqrt(2 * self.joint.a_max * x_d), self.v_1))
-
-        # Get rid of kinks at the boundary, where the v_1/v_0 values
-        # are much different from the v_c values of the adjacent blocks, and
-        # the v_c blocks are similar.
-        #
-        # So, change ___/\___ into ------
-        #
-        # We can reduce v_1/v_0 to match v_c without much concern, but
-        # should generally not increase the boundary velocity, so
-        # there is a limit on the size of increases.
-
-        if v_0 == 'mean' and prior is not None and bent(prior, self):
-            v = mean_bv(prior, self)
-            if v <= self.v_0 and v <= prior.v_1:
-                self.v_0 = v
-            elif max(abs(self.v_0 - v), abs(prior.v_1 - v)) < 2000:
-                self.v_0 = v
-
-
-        if v_1 == 'mean' and next_ is not None and bent(self, next_):
-            v = mean_bv(self, next_)
-            if v <= self.v_1 and v <= next_.v_0:
-                self.v_1 = v
-            elif max(abs(self.v_1 - v), abs(next_.v_0 - v)) < 2000:
-                self.v_1 = v
-
+            self.v_1 = int(min(self.v_1,  sqrt(2 * self.joint.a_max * x_d)))
 
         self.v_0 = min(self.v_0, self.joint.v_max)
         self.v_1 = min(self.v_1, self.joint.v_max)
