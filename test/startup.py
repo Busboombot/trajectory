@@ -2,7 +2,7 @@
 from trajectory.planner import *
 from trajectory.plot import *
 from trajectory import ParameterError
-from itertools import product 
+from itertools import product, chain
 from more_itertools import chunked
 from operator import attrgetter
 from copy import copy

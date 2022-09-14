@@ -65,8 +65,8 @@ def sign(x):
 def same_sign(a, b):
     return int(a) == 0 or int(b) == 0 or sign(a) == sign(b)
 
-def mean_bv( prior, next_):
 
+def mean_bv(prior, next_):
     if prior.t_d + next_.t_a != 0:
         a = (next_.v_c - prior.v_c) / (prior.t_d + next_.t_a)
     else:
@@ -75,6 +75,7 @@ def mean_bv( prior, next_):
     v = prior.v_c + a * prior.t_d
 
     return v
+
 
 def bent(prior, current):
     cd = current.d
@@ -128,8 +129,9 @@ class ACDBlock:
     joint: Joint = None
     segment: 'Segment' = None
 
-    recalcs: int = 0
-
+    replans: int = 0
+    reductions: "List[str]" = None
+    memo: object = None
     step_period: int = DEFAULT_PERIOD
 
     _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
@@ -143,48 +145,8 @@ class ACDBlock:
     def __post_init__(self):
         self.d = sign(self.x)
         self.x = abs(self.x)
-
-    def init(self, v_0=None, v_1=None, prior=None):
-        """Find a minimum time profile for the block"""
-
-        # Limit the boundary values for small moves
-        self.set_bv(v_0, v_1, prior)
-
-        if self.x == 0:
-            self.v_c = 0
-
-        elif self.x < 2 * self.joint.small_x:
-            # The limit is the same one used for set_bv.
-            # the equation here is the sympy solution to:
-            # t_a = (v_c - v_0) / a
-            # t_d = (v_1 - v_c) / -a
-            # x_a = ((v_0 + v_c) / 2) * t_a
-            # x_d = ((v_c + v_1) / 2) * t_d
-            # x_c = x - (x_a + x_d)
-            # solve(x_c, v_c)[1]
-
-            self.v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-
-        else:
-            # If there is more area than the triangular profile for these boundary
-            # velocities, the v_c must be v_max. In this case, it must also be true that:
-            #    x_ad, t_ad = accel_acd(self.v_0, v_max, self.v_1, a_max)
-            #    assert self.x > x_ad
-            self.v_c = self.joint.v_max
-
-        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
-        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, self.joint.a_max)
-
-        assert round(self.x_a + self.x_d) <= self.x
-
-        self.x_c = self.x - (self.x_a + self.x_d)
-        self.t_c = self.x_c / self.v_c if self.v_c != 0 else 0
-        self.t = self.t_a + self.t_c + self.t_d
-
-        assert round(self.x_c) >= 0, (self.x_c, self.v_c, self)
-        assert abs(self.area - self.x) < 1, (self.x, self.area, self.t, self.v_0, self.v_1)
-
-        return self
+        self.reductions = []
+        self.memo = []
 
     def min_time(self, v_0=None, v_1=None, prior=None):
         """Return the smallest reasonable time to complete this block"""
@@ -214,24 +176,101 @@ class ACDBlock:
             v_c = self.joint.v_max
 
         x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
-
-        x_c = self.x - x_ad
-        t_c = x_c / v_c if v_c != 0 else 0
+        t_c = (self.x - x_ad) / v_c if v_c != 0 else 0
 
         self.t = t_c + t_ad
 
         return self.t
 
-    def _plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
-
-        self.t = t
+    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
-        a_max = self.joint.a_max
+        self._plan(t)
+
+        def has_error(b, t):
+            x_err = abs(round(b.area) - b.x)
+            return round(b.x_c) < 0 or (b.x > 25 and x_err > 1) or round(t, 3) != round(b.t, 3)
+
+        if not has_error(self, t):
+            return self
+
+        # Set v_0 and v_1 to the mean velocity
+        v_m = self.x/t
+        self.v_0 = min(self.v_0, v_m)
+        self.v_1 = min(self.v_1, v_m)
+        self._plan(t)
+        if not has_error(self, t):
+            self.reductions.append('VC')
+            return self
+
+        # Finish off reducing v_1
+        while self.v_1 > 1:
+            self.v_1 = int(self.v_1 / 2)
+            self._plan(t)
+            if not has_error(self, t):
+                self.reductions.append('V1')
+                return self
+
+        # Finish off reducing v_0
+        while self.v_0 > 1:
+            self.v_0 = int(self.v_0 / 2)
+            self._plan(t)
+            if not has_error(self, t):
+                self.reductions.append('V0')
+                return self
+
+        return self
+
+
+    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
+
+        if v_0 == 'prior' and prior is not None:
+            self.v_0 = prior.v_1
+        elif v_0 is not None:
+            self.v_0 = v_0
+
+        if v_1 == 'next' and next_ is not None:
+            self.v_1 = next_.v_0
+        elif v_1 == 'v_max':
+            self.v_1 = self.joint.v_max
+        elif v_1 is not None:
+            self.v_1 = v_1
+
+        if prior:
+            # If the current block has a different sign -- changes direction --
+            # then the boundary velocity must be zero.
+            if not same_sign(prior.d, self.d) or prior.x == 0 or self.x == 0:
+                self.v_0 = 0
+
+        x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
+        x_d = self.x - x_a
+
+        if x_d < 0:
+            # Basic trapezoid formula, in terms of x instead of t
+            self.v_0 = int(min(self.v_0, sqrt(2 * self.joint.a_max * self.x)))
+            self.v_1 = 0
+        elif self.x == 0:
+            self.v_0 = 0
+            self.v_1 = 0
+        else:
+            self.v_1 = int(min(self.v_1, sqrt(2 * self.joint.a_max * x_d)))
+
+        self.v_0 = min(self.v_0, self.joint.v_max)
+        self.v_1 = min(self.v_1, self.joint.v_max)
+
+        return self.v_0, self.v_1
+
+
+    def _plan(self, t):
+
+        self.t = t
+        self.replans += 1
 
         if self.x == 0 or self.t == 0:
-            self.set_zero()
+            self.x_a = self.x_d = self.x_c = 0
+            self.t_a = self.t_d = self.t_c = 0
+            self.v_0 = self.v_c = self.v_1 = 0
             self.t_c = self.t = t
             return self
 
@@ -250,12 +289,20 @@ class ACDBlock:
 
         self.v_c = min(v_c, self.joint.v_max)
 
-        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, a_max)
-        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, a_max)
+        self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
+        self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, self.joint.a_max)
 
-        # consistantize will make all of the values consistent with each other,
-        # and if anything is wrong, it will show up in a negative x_c
-        self.consistantize()
+        self.x_c = self.x - (self.x_a + self.x_d)
+
+        self.t_a = abs((self.v_c - self.v_0) / self.joint.a_max)
+        self.t_d = abs((self.v_c - self.v_1) / self.joint.a_max)
+
+        if round(self.x_c) == 0:  # get rid of small negatives
+            self.x_c = 0
+
+        self.t_c = abs(self.x_c / self.v_c) if self.v_c != 0 else 0
+
+        self.t = self.t_a + self.t_c + self.t_d
 
         assert self.t > 0
         assert self.v_c <= self.joint.v_max
@@ -268,82 +315,6 @@ class ACDBlock:
 
         return self
 
-    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
-
-        self._plan(t, v_0=v_0, v_1=v_1, prior=prior, next_=next_)
-
-        def has_error(b):
-            x_err = abs(round(b.area) - b.x)
-            return round(b.x_c) < 0 or (b.x > 25 and x_err > 1) or round(t, 3) != round(b.t, 3)
-
-        if not has_error(self):
-            return self
-
-        # Try various strategies to fix the errors
-
-        # Reduce v_1 a bit
-        while self.v_1 > 1500:
-            self.v_1 = int(self.v_1 / 2)
-            self._plan(t, prior=prior, next_=next_)
-            if not has_error(self):
-                return self
-
-        # Maybe it just needs a re-calc to allow time to expand?
-        self._plan(self.t, prior=prior, next_=next_)
-        if not has_error(self):
-            return self
-
-        # Reduce v_0 to v_c
-        if self.v_0 > self.v_c:
-            self.v_0 = self.v_c
-            self._plan(t, prior=prior, next_=next_)
-            if not has_error(self):
-                return self
-
-        # Finish off reducing v_1
-        while self.v_1 > 1:
-            self.v_1 = int(self.v_1 / 2)
-            self._plan(t, prior=prior, next_=next_)
-            if not has_error(self):
-                return self
-
-        # Finish off reducing v_0
-        while self.v_0 > 1:
-            self.v_0 = int(self.v_0 / 2)
-            self._plan(t, prior=prior, next_=next_)
-            if not has_error(self):
-                return self
-
-    def consistantize(self, return_error=False):
-        """Recalculate t to make x and v values integers, and everything more consistent
-         This operation will maintain the original value for x, but may change t"""
-
-        self.x_c = self.x - (self.x_a + self.x_d)
-
-        self.t_a = abs((self.v_c - self.v_0) / self.joint.a_max)
-        self.t_d = abs((self.v_c - self.v_1) / self.joint.a_max)
-
-        if round(self.x_c) == 0:  # get rid of small negatives
-            self.x_c = 0
-
-        if self.v_c != 0:
-            self.t_c = abs(self.x_c / self.v_c)
-            # assert b.t_c >= 0, (b.v_c, b.t_c, b.x_c)
-        else:
-            self.t_c = 0
-
-        self.t = self.t_a + self.t_c + self.t_d
-
-        # Check error against area calculation
-        if return_error:
-            x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
-            t_c = round(self.t - t_ad, 8)  # Avoid very small negatives
-            x_c = self.v_c * t_c
-            x = x_ad + x_c
-            x_e = x - self.x
-            return self.x_c, x_e
-        else:
-            return self.x_c
 
     @property
     def area(self):
@@ -365,26 +336,6 @@ class ACDBlock:
         return x_ad + x_c
 
     @property
-    def arear(self):
-        """Robust area calculation. May return wrong results for bad parameters, but
-        will not throw exceptions"""
-
-        x_ad, t_ad = accel_acd(self.v_0, self.v_c, self.v_1, self.joint.a_max)
-
-        t_c = max(self.t - t_ad, 0)
-        x_c = max(self.v_c, 0) * t_c
-
-        return x_ad + x_c
-
-    def set_zero(self):
-
-        self.x_a = self.x_d = self.x_c = 0
-        self.t_a = self.t_d = self.t_c = 0
-        self.v_0 = self.v_c = self.v_1 = 0
-
-
-
-    @property
     def dataframe(self):
 
         rows = []
@@ -397,47 +348,6 @@ class ACDBlock:
                      'x': d * self.x_d, 'v_i': d * self.v_c, 'v_f': d * self.v_1, 'del_t': self.t_d})
 
         return pd.DataFrame(rows)
-
-    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
-
-        assert v_1 != 'prior' and v_0 != 'next'
-
-        if v_0 == 'prior' and prior is not None:
-            self.v_0 = prior.v_1
-        elif v_0 == 'v_max':
-            self.v_0 = self.joint.v_max
-        elif v_0 is not None:
-            self.v_0 = v_0
-
-        if v_1 == 'next' and next_ is not None:
-            self.v_1 = next_.v_0
-        elif v_1 == 'v_max':
-            self.v_1 = self.joint.v_max
-        elif v_1 is not None:
-            self.v_1 = v_1
-
-        if prior:
-            # If the current block has a different sign -- changes direction --
-            # then the boundary velocity must be zero.
-            if not same_sign(prior.d, self.d) or prior.x == 0 or self.x == 0:
-                self.v_0 = 0
-
-        x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
-        x_d = self.x - x_a
-
-        if x_d < 0:
-            self.v_0 = int(min(self.v_0, sqrt(2 * self.joint.a_max * self.x)))
-            self.v_1 = 0
-        elif self.x == 0:
-            self.v_0 = 0
-            self.v_1 = 0
-        else:
-            self.v_1 = int(min(self.v_1,  sqrt(2 * self.joint.a_max * x_d)))
-
-        self.v_0 = min(self.v_0, self.joint.v_max)
-        self.v_1 = min(self.v_1, self.joint.v_max)
-
-        return self.v_0, self.v_1
 
     def asdict(self):
         return asdict(self)

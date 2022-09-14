@@ -73,25 +73,6 @@ class Segment(object):
         for b in self.blocks:
             b.segment = self
 
-    def init(self, v_0=None, v_1=None, prior=None):
-        """Re-initialize all of the blocks"""
-
-        if prior is not None:
-            for prior, current in zip(prior.blocks, self.blocks):
-                current.init(v_0=v_0, v_1=v_1, prior=prior)
-        else:
-            for b in self.blocks:
-                b.init(v_0=v_0, v_1=v_1)
-
-        return self
-
-    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
-
-        for b in self.blocks:
-            b.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
-
-        return self
-
     def plan(self, v_0=None, v_1=None, prior=None, next_=None, z=None):
 
         # Planning can change the time for a block, so planning multiple
@@ -99,7 +80,7 @@ class Segment(object):
 
         self.min_time
 
-        for p_iter in range(10):
+        for p_iter in range(5): # Rarely more than 1 iteration
             mt = self.time
 
             for i, b in enumerate(self.blocks):
@@ -112,14 +93,6 @@ class Segment(object):
                 break
 
         return self
-
-    @property
-    def v_0(self):
-        return [b.v_0 for b in self.blocks]
-
-    @property
-    def v_1(self):
-        return [b.v_1 for b in self.blocks]
 
     @property
     def times(self):
@@ -193,7 +166,6 @@ class Segment(object):
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-
 class SegmentList(object):
     segments: List[Segment]
     replans: List[int] = None
@@ -233,8 +205,8 @@ class SegmentList(object):
 
         # Linear ( hopefully ) re-plan of the last few segments. This will
         # finish up straightening bumps and removing discontinuities.
-        if len(self.segments) >= 2:
-            n = index_clip(-5, self.segments) # Replan at most last 4 elements all the way through
+        if  len(self.segments) >= 2:
+            n = index_clip(-3, self.segments) # Replan at most last 4 elements all the way through
             n = max(1, n) #Replnning the first one unmoors v_0
             self.plan(n)
 
@@ -254,7 +226,7 @@ class SegmentList(object):
 
             # Smooth out boundary bumps between segments.
             def v_limit(p_idx, v_max):
-                if p_idx  == 0:
+                if p_idx == 0:
                     return v_max
                 elif p_idx < 2:
                     return v_max/4
