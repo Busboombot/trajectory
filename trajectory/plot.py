@@ -123,3 +123,42 @@ def plot_params(*args, ax=None):
     plot_trajectory(df, ax=ax)
 
     return ax
+
+
+def seg_step(sl):
+    """Produce a dataset by stepping through a segment list"""
+    from trajectory.stepper import DEFAULT_PERIOD, TIMEBASE
+
+    df = None
+    for s in sl:
+        f = pd.DataFrame(list(s.stepper()), columns=['t', 'x', 'y'])
+        assert f.t.max() <= s.time, (f.t.max(), s.time)
+        if df is None:
+            df = f
+        else:
+            f['t'] += df['t'].max()
+            df = pd.concat([df, f])
+
+    return df.reset_index(drop=True)
+
+
+def step_plot(sl, ax=None):
+    """ Plot the first two axes of a stepper dataset, generated froma SegmentList,
+    as a 2D plot"""
+    df = seg_step(sl).cumsum()
+    df.plot('x', 'y', ax=ax)
+
+
+def step_v_plot(sl, ax=None):
+    """Create a strip plot of the velocity profile of the first ais of SegmentList"""
+
+    df['x'] = seg_step(sl)['x']
+
+    t = df[['t', 'x']]
+    t = t[t.x != 0]
+    v = (1 / t.t.diff()).to_frame('v')
+    t = t.join(v)
+    t['v'] = t.v * t.x  # Sets direction
+    t['v'] = t.v.clip(-20_000, 20_000)
+    t = t[t.v < sl.joints[0].v_max + 100]
+    t.set_index('t').v.plot(ax=ax)

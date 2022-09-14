@@ -34,3 +34,17 @@ def limits():
 
     
     return list(enumerate(product(distances, velocities, velocities)))
+
+def report(sl):
+    from IPython.display import HTML
+
+    h = (f"""
+    <table>
+    <tr><td>N Discont</td>  <td>{len(list(sl.discontinuities()))}</td></tr>
+    <tr><td>Replans</td>    <td>{Counter(sl.replans).most_common(10)}</td></tr>
+    <tr><td>N Replans</td>  <td>{sum([b.replans for b in  sl.blocks])}</td></tr>
+    <tr><td>Errors</td>     <td>{Counter(chain(*[b.errors for b in sl.blocks])).most_common(10)}</td></tr>
+    <tr><td>Reductions</td> <td>{Counter(chain(*[b.reductions for b in sl.blocks])).most_common(10)}</td></tr>
+    </table>""")
+
+    display(HTML(h))

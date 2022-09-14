@@ -48,6 +48,7 @@ def index_clip(n, l):
 
     return n
 
+
 class Segment(object):
     """One segment, for all joints"""
 
@@ -73,15 +74,16 @@ class Segment(object):
         for b in self.blocks:
             b.segment = self
 
-    def plan(self, v_0=None, v_1=None, prior=None, next_=None, z=None):
+    def plan(self, v_0=None, v_1=None, prior=None, next_=None):
 
         # Planning can change the time for a block, so planning multiple
         # will ( should ) converge on a singe segment time.
 
-        self.min_time
-
-        for p_iter in range(5): # Rarely more than 1 iteration
-            mt = self.time
+        for p_iter in range(10):  # Rarely more than 1 iteration
+            if p_iter < 2:
+                mt = max(0.04, self.min_time)
+            else:
+                mt = max(0.04, self.time)
 
             for i, b in enumerate(self.blocks):
                 pb = prior.blocks[i] if prior is not None else None
@@ -93,6 +95,10 @@ class Segment(object):
                 break
 
         return self
+
+    def zero(self):
+        for b in self.blocks:
+            b.zero();
 
     @property
     def times(self):
@@ -106,6 +112,12 @@ class Segment(object):
     def min_time(self):
         """Calculated maximum of the  minimum time for each block in the segment"""
         return max([b.min_time() for b in self.blocks])
+
+    @property
+    def dominant(self):
+        x = list(reversed(sorted([ (b.min_time(), i) for i, b in enumerate(self.blocks) ])))
+        return x[0][1]
+
 
     @property
     def times_e_rms(self):
@@ -166,6 +178,7 @@ class Segment(object):
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
+
 class SegmentList(object):
     segments: List[Segment]
     replans: List[int] = None
@@ -205,9 +218,9 @@ class SegmentList(object):
 
         # Linear ( hopefully ) re-plan of the last few segments. This will
         # finish up straightening bumps and removing discontinuities.
-        if  len(self.segments) >= 2:
-            n = index_clip(-3, self.segments) # Replan at most last 4 elements all the way through
-            n = max(1, n) #Replnning the first one unmoors v_0
+        if False and len(self.segments) >= 2:
+            n = index_clip(-5, self.segments)  # Replan at most last 4 elements all the way through
+            n = max(1, n)  # Replnning the first one unmoors v_0
             self.plan(n)
 
     def plan(self, i: int = None, remove_bumps=False):
@@ -222,23 +235,24 @@ class SegmentList(object):
             pre_prior = self.segments[i - 2] if i >= 2 else None
 
             prior.plan(v_1='next', next_=current)  # Plan a first
-            current.plan(v_0='prior', prior=prior,)  # Plan b with maybe changed velocities from a
+            current.plan(v_0='prior', prior=prior, )  # Plan b with maybe changed velocities from a
 
             # Smooth out boundary bumps between segments.
             def v_limit(p_idx, v_max):
                 if p_idx == 0:
                     return v_max
                 elif p_idx < 2:
-                    return v_max/4
+                    return v_max / 4
                 else:
                     return 0;
 
             bends = 0
             for p, n in zip(prior.blocks, current.blocks):
-                if bent(p, n):
-                    diff = abs(p.v_1-mean_bv(p, n))
+                if True and bent(p, n):
+                    diff = abs(p.v_1 - mean_bv(p, n))
                     if diff < v_limit(p_idx, p.joint.v_max):
                         p.v_1 = n.v_0 = mean_bv(p, n)
+
                         bends += 1
 
             if bends or (pre_prior is not None and self.boundary_error(pre_prior, prior)):
@@ -276,7 +290,7 @@ class SegmentList(object):
     def block_pairs(self):
         for p, n in self.pairs:
             for pb, nb in zip(p.blocks, n.blocks):
-                yield(pb, nb)
+                yield (pb, nb)
 
     def discontinuities(self, index=0):
         """Yield segment pairs with velocity discontinuities"""

@@ -95,7 +95,7 @@ class Joint:
     small_x: float = None  # min distance for v_max->0->v_max
     max_discontinuity: float = None  # Max velocity difference between adjacent blocks
     max_at: float = None  # Max time to accel from 0 to v_max
-
+    n: int =0
     def __post_init__(self):
         self.small_x = (self.v_max ** 2) / (2 * self.a_max)
         self.max_discontinuity = self.a_max / self.v_max  # Max vel change in 1 step
@@ -147,6 +147,7 @@ class ACDBlock:
         self.x = abs(self.x)
         self.reductions = []
         self.memo = []
+        self.errors = []
 
     def min_time(self, v_0=None, v_1=None, prior=None):
         """Return the smallest reasonable time to complete this block"""
@@ -186,23 +187,43 @@ class ACDBlock:
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
+        if False and not self.is_dominant:
+            v = self.joint.v_max * (self.t / self.dominant.t)
+            if self.segment.prior is not None:
+                self.v_0 = min(v, self.v_0)
+
+            self.v_1 = min(v, self.v_1)
+
         self._plan(t)
 
+        return
+
         def has_error(b, t):
-            x_err = abs(round(b.area) - b.x)
-            return round(b.x_c) < 0 or (b.x > 25 and x_err > 1) or round(t, 3) != round(b.t, 3)
+            assert round(b.x_c) >= 0
+            assert not (b.x > 25 and abs(round(b.area) - b.x) > 1)
+            return round(t, 3) != round(b.t, 3)
 
         if not has_error(self, t):
+            self.reductions.append('N')
             return self
 
         # Set v_0 and v_1 to the mean velocity
         v_m = self.x/t
         self.v_0 = min(self.v_0, v_m)
         self.v_1 = min(self.v_1, v_m)
+
         self._plan(t)
         if not has_error(self, t):
             self.reductions.append('VC')
             return self
+
+        if True:
+            for t_ in range(11,18):
+                self._plan(t*t_/10.)
+                if not has_error(self, t*t_/10.):
+                    self.reductions.append('T1')
+                    return self
+
 
         # Finish off reducing v_1
         while self.v_1 > 1:
@@ -304,6 +325,7 @@ class ACDBlock:
 
         self.t = self.t_a + self.t_c + self.t_d
 
+
         assert self.t > 0
         assert self.v_c <= self.joint.v_max
         assert self.v_c >= 0, self.v_c
@@ -314,6 +336,28 @@ class ACDBlock:
         assert self.v_1 <= self.joint.v_max
 
         return self
+
+    def zero(self):
+        self.x_a = self.x_d = self.x_c = 0
+        self.t_a = self.t_d = self.t_c = 0
+        self.v_0 = self.v_c = self.v_1 = 0
+        self.t = 0
+
+    @property
+    def is_dominant(self):
+
+        if not self.segment:
+            return False
+
+        return self.segment.dominant == self.joint.n
+
+    @property
+    def dominant(self):
+        if not self.segment:
+            return False
+
+        return self.segment.blocks[self.segment.dominant]
+
 
 
     @property
