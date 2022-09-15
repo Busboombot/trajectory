@@ -378,23 +378,22 @@ class SegmentList(object):
         delay_counter =[0]*len(self.joints)
         for seg_n, s in enumerate(self.segments):
 
-            steppers = [b.stepper(details=details, delay_counter=dc) for dc, b in zip(delay_counter,s.blocks)]
+            steppers = [b.stepper(details=details) for dc, b in zip(delay_counter,s.blocks)]
+
             if details:
                 # Can only do one axis with details.
                 while True:
-                    steps = [stp.next_details() for stp in steppers]
-                    d = steps[0]
+                    d = steppers[0].next_details()
                     d['t'] = d['t'] + t0
                     d['sg'] = seg_n
                     yield d
-                    if steppers[0].done and all([stp.done for stp in steppers]):
+                    if steppers[0].done:
                         t0 = d['t']
-                        delay_counter = [s.delay_counter for s in steppers]
-
                         break
+
             else:
                 while True:
-                    steps = [next(stp) for stp in steppers]
+                    steps = [stp.next() for stp in steppers]
                     self.step_positions += np.array(steps)
                     yield [t]+steps
                     t += dt

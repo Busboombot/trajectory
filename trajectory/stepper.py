@@ -53,6 +53,8 @@ class Stepper(object):
 
         self.total_steps = abs(sum([e[0] for e in blocks]))
 
+        self.kill = 100
+
     def init_next_block(self):
 
         x, vi, vf = self.blocks[self.phase]
@@ -65,7 +67,7 @@ class Stepper(object):
         self.delay_inc = self.period / TIMEBASE
         self.step_inc = 1
 
-        self.t_f = abs((2. * self.x) / (vi + vf))
+        self.t_f = abs((2. * self.x) / (vi + vf)) if (vi+vf) != 0 else 0
         #self.a = (vf ** 2 - vi ** 2) / (2 * x) if x != 0 else 0
         self.a = (self.vf-self.vi)/ self.t_f if self.t_f != 0 else 0
 
@@ -85,6 +87,8 @@ class Stepper(object):
 
         self.periods_left = int(round(self.t_f / self.delay_inc))
 
+        self.kill = 100
+
     def __iter__(self):
         if self.details:
             while True:
@@ -95,14 +99,15 @@ class Stepper(object):
 
         else:
             while True:
-                s = next(self)
+                s = self.next()
                 yield s
                 if s == -2:
                     return
 
-    def __next__(self):
+    def next(self):
 
-        if self.steps_left == 0 or self.periods_left == 0:
+        if self.steps_left <= 0 or self.periods_left <= 0:
+
             if self.phase == 3:
                 self.done = True
                 self.delay_counter += self.delay_inc
@@ -116,6 +121,7 @@ class Stepper(object):
             self.steps_left -= self.step_inc
             self.steps_stepped += self.step_inc
             r = self.direction
+
         else:
             r = 0
 
@@ -139,7 +145,7 @@ class Stepper(object):
         return r
 
     def next_details(self):
-        step = next(self)
+        step = self.next()
         d = dict(s=step, dr=self.direction, t=self.t, pt=self.phase_t, tf=self.t_f, v=self.v,
                  a=self.a,
                  #vi=self.vi, vf=self.vf,
