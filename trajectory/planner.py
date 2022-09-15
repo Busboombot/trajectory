@@ -375,27 +375,32 @@ class SegmentList(object):
         dt = period/TIMEBASE
         t = 0
         t0 = 0
+        delay_counter =[0]*len(self.joints)
         for seg_n, s in enumerate(self.segments):
 
-            steppers = [b.stepper(details=details) for b in s.blocks]
+            steppers = [b.stepper(details=details, delay_counter=dc) for dc, b in zip(delay_counter,s.blocks)]
             if details:
                 # Can only do one axis with details.
                 while True:
-                    d = steppers[0].next_details()
+                    steps = [stp.next_details() for stp in steppers]
+                    d = steps[0]
                     d['t'] = d['t'] + t0
                     d['sg'] = seg_n
                     yield d
-                    if steppers[0].done:
+                    if steppers[0].done and all([stp.done for stp in steppers]):
                         t0 = d['t']
+                        delay_counter = [s.delay_counter for s in steppers]
+
                         break
             else:
                 while True:
                     steps = [next(stp) for stp in steppers]
                     self.step_positions += np.array(steps)
                     yield [t]+steps
-
                     t += dt
                     if steppers[0].done and all([stp.done for stp in steppers]):
+                        delay_counter = [s.delay_counter for s in steppers]
+                        t0 = t
                         break
 
     def plot(self, ax=None, axis=None):

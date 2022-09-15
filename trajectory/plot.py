@@ -154,8 +154,7 @@ def step_v_df(sl):
     v = (1 / t.t.diff()).to_frame('v')
     t = t.join(v)
     t['v'] = t.v * t.x  # Sets direction
-    t['v'] = t.v.clip(-20_000, 20_000)
-    t = t[t.v < sl.joints[0].v_max + 100]
+
     return t.set_index('t').drop(columns=['x'])
 
 

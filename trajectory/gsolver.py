@@ -392,7 +392,7 @@ class ACDBlock:
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-    def stepper(self, period=None, details=False):
+    def stepper(self, period=None, details=False, delay_counter=0):
 
         if period is None:
             period = self.step_period
@@ -406,7 +406,7 @@ class ACDBlock:
             (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
         )
 
-        return Stepper(step_blocks, period, details=details)
+        return Stepper(step_blocks, period, details=details, delay_counter=0)
 
 
     def iter_steps(self, until_t=None, period=None, details=False):
