@@ -125,21 +125,18 @@ def plot_params(*args, ax=None):
     return ax
 
 
-def seg_step(sl):
+def seg_step(sl, details=None):
     """Produce a dataset by stepping through a segment list"""
     from trajectory.stepper import DEFAULT_PERIOD, TIMEBASE
 
-    df = None
-    for s in sl:
-        f = pd.DataFrame(list(s.stepper()), columns=['t', 'x', 'y'])
-        assert f.t.max() <= s.time, (f.t.max(), s.time)
-        if df is None:
-            df = f
-        else:
-            f['t'] += df['t'].max()
-            df = pd.concat([df, f])
+    if details:
+        return pd.DataFrame(list(sl.step(details=details))).set_index('t')
+    else:
+        l = list(sl.step())
 
-    return df.reset_index(drop=True)
+        columns = list('txyzabc')[:len(l[0])]
+
+        return pd.DataFrame(l, columns=columns).set_index('t')
 
 
 def step_plot(sl, ax=None):
@@ -149,10 +146,8 @@ def step_plot(sl, ax=None):
     df.plot('x', 'y', ax=ax)
 
 
-def step_v_plot(sl, ax=None):
-    """Create a strip plot of the velocity profile of the first ais of SegmentList"""
-
-    df['x'] = seg_step(sl)['x']
+def step_v_df(sl):
+    df = seg_step(sl).reset_index()
 
     t = df[['t', 'x']]
     t = t[t.x != 0]
@@ -161,4 +156,28 @@ def step_v_plot(sl, ax=None):
     t['v'] = t.v * t.x  # Sets direction
     t['v'] = t.v.clip(-20_000, 20_000)
     t = t[t.v < sl.joints[0].v_max + 100]
-    t.set_index('t').v.plot(ax=ax)
+    return t.set_index('t').drop(columns=['x'])
+
+
+def step_v_plot(sl, ax=None):
+    """Create a strip plot of the velocity profile of the first ais of SegmentList"""
+
+    df = step_v_df(sl)
+
+    df.v.plot(ax=ax)
+
+
+def stepper_plot(sl):
+    fig = plt.figure(figsize=(12, 12), constrained_layout=True)
+    spec = fig.add_gridspec(2, 2)
+
+    ax1 = fig.add_subplot(spec[0, :])
+    ax1.set_title("Velocity Profile")
+    ax2 = fig.add_subplot(spec[1, 0])
+    ax2.set_title('2D plot')
+    ax3 = fig.add_subplot(spec[1, 1])
+    ax3.set_title('Stepper Velocity Plot for First Axis')
+
+    sl.plot(ax=ax1)
+    step_plot(sl, ax=ax2)
+    step_v_plot(sl, ax=ax3)

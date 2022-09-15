@@ -95,7 +95,8 @@ class Joint:
     small_x: float = None  # min distance for v_max->0->v_max
     max_discontinuity: float = None  # Max velocity difference between adjacent blocks
     max_at: float = None  # Max time to accel from 0 to v_max
-    n: int =0
+    n: int = 0
+
     def __post_init__(self):
         self.small_x = (self.v_max ** 2) / (2 * self.a_max)
         self.max_discontinuity = self.a_max / self.v_max  # Max vel change in 1 step
@@ -143,6 +144,7 @@ class ACDBlock:
         return f"{self.segment.n}/{self.joint.n}"
 
     def __post_init__(self):
+
         self.d = sign(self.x)
         self.x = abs(self.x)
         self.reductions = []
@@ -187,13 +189,6 @@ class ACDBlock:
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
-        if False and not self.is_dominant:
-            v = self.joint.v_max * (self.t / self.dominant.t)
-            if self.segment.prior is not None:
-                self.v_0 = min(v, self.v_0)
-
-            self.v_1 = min(v, self.v_1)
-
         self._plan(t)
 
         return
@@ -208,7 +203,7 @@ class ACDBlock:
             return self
 
         # Set v_0 and v_1 to the mean velocity
-        v_m = self.x/t
+        v_m = self.x / t
         self.v_0 = min(self.v_0, v_m)
         self.v_1 = min(self.v_1, v_m)
 
@@ -218,12 +213,11 @@ class ACDBlock:
             return self
 
         if True:
-            for t_ in range(11,18):
-                self._plan(t*t_/10.)
-                if not has_error(self, t*t_/10.):
+            for t_ in range(11, 18):
+                self._plan(t * t_ / 10.)
+                if not has_error(self, t * t_ / 10.):
                     self.reductions.append('T1')
                     return self
-
 
         # Finish off reducing v_1
         while self.v_1 > 1:
@@ -242,7 +236,6 @@ class ACDBlock:
                 return self
 
         return self
-
 
     def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
 
@@ -281,7 +274,6 @@ class ACDBlock:
         self.v_1 = min(self.v_1, self.joint.v_max)
 
         return self.v_0, self.v_1
-
 
     def _plan(self, t):
 
@@ -325,7 +317,6 @@ class ACDBlock:
 
         self.t = self.t_a + self.t_c + self.t_d
 
-
         assert self.t > 0
         assert self.v_c <= self.joint.v_max
         assert self.v_c >= 0, self.v_c
@@ -357,8 +348,6 @@ class ACDBlock:
             return False
 
         return self.segment.blocks[self.segment.dominant]
-
-
 
     @property
     def area(self):
@@ -403,18 +392,24 @@ class ACDBlock:
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-    def steppers(self, period=None):
+    def stepper(self, period=None, details=False):
 
         if period is None:
             period = self.step_period
 
-        return [
-            Stepper(self.d * self.x_a, self.v_0, self.v_c, period),
-            Stepper(self.d * self.x_c, self.v_c, self.v_c, period),
-            Stepper(self.d * self.x_d, self.v_c, self.v_1, period),
-        ]
+        def ri(v):
+            return int(round(v))
 
-    def iter_steps(self, until_t=None, period=None):
+        step_blocks = (
+            (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
+            (ri(self.d * self.x_c), ri(self.d * self.v_c), ri(self.d * self.v_c)),
+            (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
+        )
+
+        return Stepper(step_blocks, period, details=details)
+
+
+    def iter_steps(self, until_t=None, period=None, details=False):
 
         if period is None:
             period = self.step_period
@@ -425,16 +420,19 @@ class ACDBlock:
             until_t *= int(period * TIMEBASE)
 
         t = 0
-        for s in self.steppers(period):
-
+        for s in self.steppers(period, details=details):
             while not s.done:
                 yield next(s)
                 t += period
                 if t >= until_t:
                     return
 
+
         while True:
-            yield 0
+            if details:
+                yield 0, 0, 0, 0, 0, 0, 0
+            else:
+                yield 0
             t += period
             if t >= until_t:
                 return

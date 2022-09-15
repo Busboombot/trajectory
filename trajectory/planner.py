@@ -33,8 +33,8 @@ Joint segment shapes
 import math
 from collections import deque
 from typing import List
-
 import pandas as pd
+import numpy as np
 
 from .gsolver import Joint, ACDBlock, bent, mean_bv
 
@@ -150,21 +150,35 @@ class Segment(object):
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
 
-    def stepper(self):
+    def stepper(self, t0=0, period=None, timebase=None, details=False):
         """Run steppers for all of the blocks in this segment"""
         from .stepper import DEFAULT_PERIOD, TIMEBASE
+        from itertools import zip_longest
 
-        steppers = [b.iter_steps(self.time, DEFAULT_PERIOD) for b in self.blocks]
+        period = period if period else DEFAULT_PERIOD
+        timebase = timebase if timebase else TIMEBASE
 
-        t = 0
+        steppers = [b.iter_steps(self.time, period, details=details) for b in self.blocks]
+
+        t = t0
         end_time = self.time
-        time_step = DEFAULT_PERIOD / TIMEBASE
+        time_step = period / timebase
 
-        for steps in zip(*steppers):
-            yield (round(t, 6),) + steps
-            t += time_step
-            if t > end_time:
-                break
+        if details:
+            # Only return one axis  because details have ultiple columns
+            for steps in steppers[0]:
+                yield (round(t, 6),) + steps
+                t += time_step
+                if t > end_time:
+                    break
+
+        else:
+
+            for steps in zip(*steppers):
+                yield (round(t, 6),) + steps
+                t += time_step
+                if t > end_time:
+                    break
 
     @property
     def dataframe(self):
@@ -182,7 +196,8 @@ class Segment(object):
 class SegmentList(object):
     segments: List[Segment]
     replans: List[int] = None
-
+    move_positions: List[int] = None
+    step_positions: List[int] = None
     def __init__(self, joints: List[Joint]):
 
         self.joints = [Joint(j.v_max, j.a_max, i) for i, j in enumerate(joints)]
@@ -194,12 +209,18 @@ class SegmentList(object):
 
         self.segments = deque()
 
+        self.move_positions = [0]*len(joints)
+        self.step_positions = np.array([0] * len(joints))
+
         self.replans = []
 
     def move(self, x: List[int]):
         """Add a new segment, with joints expressing joint distance
         :type x: object
         """
+
+        for i, x_ in enumerate(x):
+            self.move_positions[i] += x_
 
         assert len(x) == len(self.joints)
 
@@ -347,24 +368,35 @@ class SegmentList(object):
     def time(self):
         return sum([s.time for s in self.segments])
 
-    def stepper(self):
-        """Step through **and consume** the segments, producing steps. The SegmentList
-        will be empty when this generator completes. """
-
+    def step(self, details=False):
         from .stepper import DEFAULT_PERIOD, TIMEBASE
+        period = DEFAULT_PERIOD
 
-        while len(self.segments) > 0:
-            steppers = [b.iter_steps(self.time, DEFAULT_PERIOD) for b in self.segments[0].blocks]
-            t = 0
-            end_time = self.segments[0].time
-            time_step = DEFAULT_PERIOD / TIMEBASE
-            for steps in zip(*steppers):
-                yield (round(t, 6),) + steps
-                t += time_step
-                if t > end_time:
-                    break
+        dt = period/TIMEBASE
+        t = 0
+        t0 = 0
+        for seg_n, s in enumerate(self.segments):
 
-            self.segments.pop()
+            steppers = [b.stepper(details=details) for b in s.blocks]
+            if details:
+                # Can only do one axis with details.
+                while True:
+                    d = steppers[0].next_details()
+                    d['t'] = d['t'] + t0
+                    d['sg'] = seg_n
+                    yield d
+                    if steppers[0].done:
+                        t0 = d['t']
+                        break
+            else:
+                while True:
+                    steps = [next(stp) for stp in steppers]
+                    self.step_positions += np.array(steps)
+                    yield [t]+steps
+
+                    t += dt
+                    if steppers[0].done and all([stp.done for stp in steppers]):
+                        break
 
     def plot(self, ax=None, axis=None):
         from .plot import plot_trajectory
