@@ -167,7 +167,7 @@ def step_v_plot(sl, ax=None):
 
 
 def stepper_plot(sl):
-    fig = plt.figure(figsize=(12, 12), constrained_layout=True)
+    fig = plt.figure(figsize=(8, 8), constrained_layout=True)
     spec = fig.add_gridspec(2, 2)
 
     ax1 = fig.add_subplot(spec[0, :])

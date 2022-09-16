@@ -32,14 +32,12 @@ class Stepper(object):
     done: bool = False
     blocks: "List[tuple]" = []
 
-    def __init__(self, blocks, period=DEFAULT_PERIOD, delay_counter=0, details=False):
+    def __init__(self, period=DEFAULT_PERIOD, details=False):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
-        self.blocks = blocks
         self.period = period
         self.delay_inc = period / TIMEBASE
-
-        self.delay_counter=delay_counter
+        self.delay_counter=0
 
         self.t = 0
         self.phase_t = 0
@@ -50,14 +48,17 @@ class Stepper(object):
         self.details = details
         self.v = 0
         self.step_inc = 1
+        self.done = False
 
-        self.total_steps = abs(sum([e[0] for e in blocks]))
+    def load_phases(self, phases):
 
-        self.kill = 100
+        self.phases = phases
+        self.phase = 0
+        self.done = False
 
-    def init_next_block(self):
+    def init_next_phase(self):
 
-        x, vi, vf = self.blocks[self.phase]
+        x, vi, vf = self.phases[self.phase]
 
         self.direction = sign(x)
 
@@ -76,7 +77,6 @@ class Stepper(object):
         self.phase_t = 0
 
         self.calc_x = 0
-        self.delay = 0
 
         # Slow start. Without this, we get a step early in the phase,
         # which results in very high instantaneous velocity.
@@ -87,41 +87,24 @@ class Stepper(object):
 
         self.periods_left = int(round(self.t_f / self.delay_inc))
 
-        self.kill = 100
+        self.done=False
 
-    def __iter__(self):
-        if self.details:
-            while True:
-                s = self.next_details()
-                if s['isdone']:
-                    return
-                yield s
-
-        else:
-            while True:
-                s = self.next()
-                yield s
-                if s == -2:
-                    return
 
     def next(self):
 
         if self.steps_left <= 0 or self.periods_left <= 0:
-
-            if self.phase == 3:
-                self.done = True
-                self.delay_counter += self.delay_inc
-                return 0
-            else:
-                self.init_next_block()
-                self.phase += 1
+           if self.done or self.phase == 3:
+               self.done = True
+               return 0
+           else:
+               self.init_next_phase()
+               self.phase += 1
 
         if self.delay_counter > self.delay:
             self.delay_counter -= self.delay
             self.steps_left -= self.step_inc
             self.steps_stepped += self.step_inc
             r = self.direction
-
         else:
             r = 0
 
@@ -129,7 +112,7 @@ class Stepper(object):
 
         self.v = self.vi + self.a * self.phase_t
 
-        self.delay = abs( 1 / self.v) if self.v else 0
+        self.delay = abs( 1 / self.v) if self.v else 1
         self.delay_counter += self.delay_inc
 
         self.t += self.delay_inc
@@ -157,3 +140,11 @@ class Stepper(object):
                  )
 
         return d
+
+    def __iter__(self):
+        if self.details:
+            while not self.done:
+                if self.details:
+                    yield self.next_details()
+                else:
+                    yield self.next()

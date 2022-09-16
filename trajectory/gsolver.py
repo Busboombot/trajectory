@@ -392,50 +392,33 @@ class ACDBlock:
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-    def stepper(self, period=None, details=False, delay_counter=0):
-
-        if period is None:
-            period = self.step_period
+    def stepper_blocks(self):
 
         def ri(v):
             return int(round(v))
 
-        step_blocks = (
-            (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
-            (ri(self.d * self.x_c), ri(self.d * self.v_c), ri(self.d * self.v_c)),
-            (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
+        return (
+           (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
+           (ri(self.d * self.x_c), ri(self.d * self.v_c), ri(self.d * self.v_c)),
+           (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
         )
 
-        return Stepper(step_blocks, period, details=details, delay_counter=0)
 
+    def step(self,  period=DEFAULT_PERIOD, details=False):
 
-    def iter_steps(self, until_t=None, period=None, details=False):
-
-        if period is None:
-            period = self.step_period
-
-        if until_t is None:
-            until_t = int(self.segment.time * period * TIMEBASE)
-        else:
-            until_t *= int(period * TIMEBASE)
+        stp = Stepper(period, details=details)
 
         t = 0
-        for s in self.steppers(period, details=details):
-            while not s.done:
-                yield next(s)
-                t += period
-                if t >= until_t:
-                    return
 
+        stp.load_phases(self.stepper_blocks())
 
-        while True:
+        while not stp.done:
             if details:
-                yield 0, 0, 0, 0, 0, 0, 0
+                yield stp.next_details()
             else:
-                yield 0
+                yield stp.next()
+
             t += period
-            if t >= until_t:
-                return
 
     def str(self):
         from colors import color, bold

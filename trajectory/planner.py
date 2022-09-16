@@ -33,8 +33,9 @@ Joint segment shapes
 import math
 from collections import deque
 from typing import List
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 from .gsolver import Joint, ACDBlock, bent, mean_bv
 
@@ -115,9 +116,8 @@ class Segment(object):
 
     @property
     def dominant(self):
-        x = list(reversed(sorted([ (b.min_time(), i) for i, b in enumerate(self.blocks) ])))
+        x = list(reversed(sorted([(b.min_time(), i) for i, b in enumerate(self.blocks)])))
         return x[0][1]
-
 
     @property
     def times_e_rms(self):
@@ -153,7 +153,6 @@ class Segment(object):
     def stepper(self, t0=0, period=None, timebase=None, details=False):
         """Run steppers for all of the blocks in this segment"""
         from .stepper import DEFAULT_PERIOD, TIMEBASE
-        from itertools import zip_longest
 
         period = period if period else DEFAULT_PERIOD
         timebase = timebase if timebase else TIMEBASE
@@ -198,6 +197,7 @@ class SegmentList(object):
     replans: List[int] = None
     move_positions: List[int] = None
     step_positions: List[int] = None
+
     def __init__(self, joints: List[Joint]):
 
         self.joints = [Joint(j.v_max, j.a_max, i) for i, j in enumerate(joints)]
@@ -209,7 +209,7 @@ class SegmentList(object):
 
         self.segments = deque()
 
-        self.move_positions = [0]*len(joints)
+        self.move_positions = [0] * len(joints)
         self.step_positions = np.array([0] * len(joints))
 
         self.replans = []
@@ -368,39 +368,39 @@ class SegmentList(object):
     def time(self):
         return sum([s.time for s in self.segments])
 
+    @property
+    def stepper_blocks(self):
+
+        for seg_n, s in enumerate(self.segments):
+            yield seg_n, [b.stepper_blocks() for b in s.blocks]
+
+
     def step(self, details=False):
-        from .stepper import DEFAULT_PERIOD, TIMEBASE
+        from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
         period = DEFAULT_PERIOD
 
-        dt = period/TIMEBASE
+        dt = period / TIMEBASE
         t = 0
-        t0 = 0
-        delay_counter =[0]*len(self.joints)
-        for seg_n, s in enumerate(self.segments):
 
-            steppers = [b.stepper(details=details) for dc, b in zip(delay_counter,s.blocks)]
+        steppers = [Stepper(details=details) for _ in self.joints]
+
+        for seg_n,  stepper_blocks in self.stepper_blocks:
+
+            for stp, sb in zip(steppers, stepper_blocks):
+                stp.load_phases(sb)
 
             if details:
-                # Can only do one axis with details.
-                while True:
+                while not steppers[0].done and not all([stp.done for stp in steppers]):
                     d = steppers[0].next_details()
-                    d['t'] = d['t'] + t0
                     d['sg'] = seg_n
                     yield d
-                    if steppers[0].done:
-                        t0 = d['t']
-                        break
-
             else:
-                while True:
+                while not steppers[0].done and not all([stp.done for stp in steppers]):
                     steps = [stp.next() for stp in steppers]
                     self.step_positions += np.array(steps)
-                    yield [t]+steps
+                    yield [t] + steps
                     t += dt
-                    if steppers[0].done and all([stp.done for stp in steppers]):
-                        delay_counter = [s.delay_counter for s in steppers]
-                        t0 = t
-                        break
+
 
     def plot(self, ax=None, axis=None):
         from .plot import plot_trajectory
