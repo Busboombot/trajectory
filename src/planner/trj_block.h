@@ -12,6 +12,12 @@ class Segment;
 class Joint;
 class Planner;
 
+enum class BV {
+    PRIOR = -1, // Use the velocity from the previous block
+    NEXT = -2,  // Use the velocity from the next block
+    V_MAX = -3, // Set the velocity to V_MAX for this joint.
+    NA = -4     // Don't change the Boundary Value
+};
 
 class Block {
 
@@ -68,7 +74,7 @@ public:
 
     trj_float_t getT() const;
 
-    void setBv(trj_float_t v_0_, trj_float_t v_1_); // Clip the boundary values based on the distance
+    void setBv(int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr) ; // Clip the boundary values based on the distance
 
     void limitBv();
 

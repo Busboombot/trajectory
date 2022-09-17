@@ -123,7 +123,7 @@ class Stepper(object):
 
         if abs(self.x_err) > .5 and self.phase == 1:
             s = self.x_err / abs(self.x_err)
-            self.delay_counter += -s * self.delay_inc
+            self.delay_counter += -s * self.delay_inc * .1
 
         return r
 

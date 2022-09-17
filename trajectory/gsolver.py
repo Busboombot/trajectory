@@ -181,61 +181,21 @@ class ACDBlock:
         x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
         t_c = (self.x - x_ad) / v_c if v_c != 0 else 0
 
+        t_c = max(t_c, t_ad/2) # Enforce 1/3 rule, each a,c,d is 1/3 of total time
+
         self.t = t_c + t_ad
 
         return self.t
 
-    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None):
+    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None, iter=None):
+
+        if self.segment is not None:
+            assert not ( (prior is None) ^ (self.segment.prior is None))
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
         self._plan(t)
 
-        return
-
-        def has_error(b, t):
-            assert round(b.x_c) >= 0
-            assert not (b.x > 25 and abs(round(b.area) - b.x) > 1)
-            return round(t, 3) != round(b.t, 3)
-
-        if not has_error(self, t):
-            self.reductions.append('N')
-            return self
-
-        # Set v_0 and v_1 to the mean velocity
-        v_m = self.x / t
-        self.v_0 = min(self.v_0, v_m)
-        self.v_1 = min(self.v_1, v_m)
-
-        self._plan(t)
-        if not has_error(self, t):
-            self.reductions.append('VC')
-            return self
-
-        if True:
-            for t_ in range(11, 18):
-                self._plan(t * t_ / 10.)
-                if not has_error(self, t * t_ / 10.):
-                    self.reductions.append('T1')
-                    return self
-
-        # Finish off reducing v_1
-        while self.v_1 > 1:
-            self.v_1 = int(self.v_1 / 2)
-            self._plan(t)
-            if not has_error(self, t):
-                self.reductions.append('V1')
-                return self
-
-        # Finish off reducing v_0
-        while self.v_0 > 1:
-            self.v_0 = int(self.v_0 / 2)
-            self._plan(t)
-            if not has_error(self, t):
-                self.reductions.append('V0')
-                return self
-
-        return self
 
     def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
 
@@ -327,6 +287,53 @@ class ACDBlock:
         assert self.v_1 <= self.joint.v_max
 
         return self
+
+    def reductions(self, t):
+
+        def has_error(b, t):
+            assert round(b.x_c) >= 0
+            assert not (b.x > 25 and abs(round(b.area) - b.x) > 1)
+            return round(t, 3) != round(b.t, 3)
+
+        if not has_error(self, t):
+            self.reductions.append('N')
+            return self
+
+        # Set v_0 and v_1 to the mean velocity
+        v_m = self.x / t
+        self.v_0 = min(self.v_0, v_m)
+        self.v_1 = min(self.v_1, v_m)
+
+        self._plan(t)
+        if not has_error(self, t):
+            self.reductions.append('VC')
+            return self
+
+        if True:
+            for t_ in range(11, 18):
+                self._plan(t * t_ / 10.)
+                if not has_error(self, t * t_ / 10.):
+                    self.reductions.append('T1')
+                    return self
+
+        # Finish off reducing v_1
+        while self.v_1 > 1:
+            self.v_1 = int(self.v_1 / 2)
+            self._plan(t)
+            if not has_error(self, t):
+                self.reductions.append('V1')
+                return self
+
+        # Finish off reducing v_0
+        while self.v_0 > 1:
+            self.v_0 = int(self.v_0 / 2)
+            self._plan(t)
+            if not has_error(self, t):
+                self.reductions.append('V0')
+                return self
+
+        return self
+
 
     def zero(self):
         self.x_a = self.x_d = self.x_c = 0

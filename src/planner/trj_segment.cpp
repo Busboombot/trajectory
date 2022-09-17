@@ -36,7 +36,7 @@ Segment::Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move
 void Segment::setBv(vector<double> v_0_, vector<double> v_1_) {
 
     for (int i = 0; i < blocks.size(); i++) {
-        blocks[i].setBv(v_0_[i], v_1_[i]);
+        blocks[i].setBv(v_0_[i], v_1_[i], nullptr, nullptr);
     }
 }
 

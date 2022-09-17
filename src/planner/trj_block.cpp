@@ -118,9 +118,7 @@ trj_float_t Block::consistantize() {
 void Block::init() {
 
 
-
-
-    setBv(0, 0);
+    setBv(0, 0, nullptr, nullptr);
 
     v_0 = fmin(v_0, joint.v_max);
     v_1 = fmin(v_1, joint.v_max);
@@ -146,45 +144,53 @@ void Block::init() {
         t_c = 0;
     }
 
-
-
     t = t_a + t_c + t_d;
-
-
-
 }
 
-void Block::setBv(trj_float_t v_0_, trj_float_t v_1_) {
-    // Reduce v_0 and v_1 for small values of x when there is an
-    // error in x after planning
+void Block::setBv(int v_0_, int v_1_, Block *prior , Block *next ) {
 
+    trj_float_t x_a_, t_a_;
 
-    trj_float_t x_a_, t_a_, t_d_, x_d_;
-
-    if (!isnan(v_0_)) {
+    if (v_0 == (int) BV::PRIOR && prior != nullptr) {
+        v_0 = prior->v_1;
+    } else if (v_0_ != (int) BV::NA) {
         v_0 = v_0_;
     }
-    if (!isnan(v_1_)) {
+
+    if (v_1_ == (int) BV::NEXT && next != nullptr) {
+        v_1 = next->v_0;
+    } else if (v_1_ == (int) BV::V_MAX) {
+        v_1 = this->joint.v_max;
+    } else if (v_1_ != (int)BV::NA) {
         v_1 = v_1_;
     }
 
-    tie(x_a_, t_a_) = accel_xt(v_0, 0);
-    x_d_ = x - x_a_;
+    if (prior != nullptr) {
+        // If the current block has a different sign -- changes direction --
+        // then the boundary velocity must be zero.
+        if (!same_sign(prior->d, d) || prior->x == 0 or x == 0) {
+            v_0 = 0;
+        }
+    }
 
+    tie(x_a_, t_a_) = accel_xt(v_0, 0);
+    trj_float_t x_d_ = x - x_a;
 
     if (x_d_ < 0) {
-        v_0 = int(min(v_0,  sqrt(2.0 *  static_cast< double >(joint.a_max) *  static_cast< double >(x))));
-
+        v_0 = int(min(v_0, sqrt(2.0 * joint.a_max * static_cast< double >(x))));
         v_1 = 0;
     } else if (x == 0) {
         v_0 = 0;
         v_1 = 0;
     } else {
-        v_1 = int(min(sqrt(2.0 * joint.a_max * t_d_), v_1));
+        v_1 = int(min(v_1, sqrt(2.0 * joint.a_max * x_d)));
     }
 
+    v_0 = min(v_0, joint.v_max);
+    v_1 = min(v_1, joint.v_max);
 
 }
+
 
 tuple<trj_float_t, trj_float_t> Block::accel_xt(trj_float_t v_i, trj_float_t v_f) {
     // Distance and time required to accelerate from v0 to v1 at

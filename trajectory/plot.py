@@ -157,6 +157,17 @@ def step_v_df(sl):
 
     return t.set_index('t').drop(columns=['x'])
 
+def v_diff(sl):
+
+    df = seg_step(sl)
+
+    t = df.reset_index()
+    nz = t[t.s != 0].copy()
+    nz['vc'] = 1 / (nz.t.diff()) * nz.s
+
+    return df.reset_index().join(nz[['vc']])
+
+
 
 def step_v_plot(sl, ax=None):
     """Create a strip plot of the velocity profile of the first ais of SegmentList"""

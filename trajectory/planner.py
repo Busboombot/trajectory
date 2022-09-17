@@ -58,6 +58,7 @@ class Segment(object):
     blocks: "List[ACDBlock]" = None
     joints: List[Joint] = None
     prior: "Segment" = None
+    move: "List[int]" = None
 
     replans: int = 0
 
@@ -65,6 +66,7 @@ class Segment(object):
 
         self.n = n
         self.joints = joints
+        self.move = move
 
         if prior is not None:
             self.prior = prior
@@ -75,13 +77,15 @@ class Segment(object):
         for b in self.blocks:
             b.segment = self
 
-    def plan(self, v_0=None, v_1=None, prior=None, next_=None):
+    def plan(self, v_0=None, v_1=None, prior=None, next_=None, t=None, iter=10):
 
         # Planning can change the time for a block, so planning multiple
         # will ( should ) converge on a singe segment time.
 
-        for p_iter in range(10):  # Rarely more than 1 iteration
-            if p_iter < 2:
+        for p_iter in range(iter):  # Rarely more than 1 iteration
+            if t is not None:
+                mt = t
+            elif p_iter < 2:
                 mt = max(0.04, self.min_time)
             else:
                 mt = max(0.04, self.time)
@@ -90,7 +94,7 @@ class Segment(object):
                 pb = prior.blocks[i] if prior is not None else None
                 nb = next_.blocks[i] if next_ is not None else None
 
-                b.plan(mt, v_0, v_1, pb, nb)
+                b.plan(mt, v_0, v_1, pb, nb, iter=p_iter)
 
             if self.times_e_rms < .001:
                 break
@@ -210,6 +214,7 @@ class SegmentList(object):
         self.segments = deque()
 
         self.move_positions = [0] * len(joints)
+        self.distance = [0] * len(joints)
         self.step_positions = np.array([0] * len(joints))
 
         self.replans = []
@@ -221,6 +226,7 @@ class SegmentList(object):
 
         for i, x_ in enumerate(x):
             self.move_positions[i] += x_
+            self.distance[i] += abs(x_)
 
         assert len(x) == len(self.joints)
 
@@ -233,7 +239,7 @@ class SegmentList(object):
         if prior is None:
             s.plan(v_0=0, v_1=0)
         else:
-            prior.plan(v_1='v_max')
+            prior.plan(v_1='v_max', prior=prior.prior)
             s.plan(v_0='prior', v_1=0, prior=prior)
             self.plan(len(self.segments) - 1)
 
@@ -244,26 +250,28 @@ class SegmentList(object):
             n = max(1, n)  # Replnning the first one unmoors v_0
             self.plan(n)
 
-    def plan(self, i: int = None, remove_bumps=False):
+    def plan(self, i: int = None):
 
         if i is None:
-            i = len(self.segments) - 1
+            i = len(self.segments)-1
 
         for p_idx in range(15):
 
             current = self.segments[i]
-            prior = self.segments[i - 1]
+            prior = self.segments[i - 1] if i >= 1 else None
             pre_prior = self.segments[i - 2] if i >= 2 else None
 
-            prior.plan(v_1='next', next_=current)  # Plan a first
-            current.plan(v_0='prior', prior=prior, )  # Plan b with maybe changed velocities from a
+            assert prior == current.prior, (i, prior.n, current.prior.n)
+
+            prior.plan(  v_1='next',  prior=pre_prior, next_=current)  # Plan a first
+            current.plan(v_0='prior', prior=prior )  # Plan b with maybe changed velocities from a
 
             # Smooth out boundary bumps between segments.
             def v_limit(p_idx, v_max):
-                if p_idx == 0:
+                if p_idx < 2:
                     return v_max
-                elif p_idx < 2:
-                    return v_max / 4
+                elif p_idx < 4:
+                    return v_max / 2
                 else:
                     return 0;
 
@@ -273,7 +281,6 @@ class SegmentList(object):
                     diff = abs(p.v_1 - mean_bv(p, n))
                     if diff < v_limit(p_idx, p.joint.v_max):
                         p.v_1 = n.v_0 = mean_bv(p, n)
-
                         bends += 1
 
             if bends or (pre_prior is not None and self.boundary_error(pre_prior, prior)):
@@ -285,12 +292,17 @@ class SegmentList(object):
             else:
                 i += 1  # Advance to the next segment
 
-            i = max(0, i)
+            i = max(1, i)
 
             if i >= len(self.segments):
                 break
 
         self.replans.append(p_idx)
+
+    @property
+    def edist(self):
+        """Euclidean distances"""
+        return [ np.sqrt(np.sum(np.square(s.move))) for s in self.segments]
 
     def boundary_error(self, p, c):
         return math.sqrt(sum([(pb.v_1 - cb.v_0) ** 2 for pb, cb in zip(p.blocks, c.blocks)]))
@@ -300,6 +312,11 @@ class SegmentList(object):
 
         for c, n in zip(self.segments, list(self.segments)[1:]):
             yield c, n
+
+    @property
+    def triplets(self):
+        for p, c, n in zip(self.segments, list(self.segments)[1:], list(self.segments)[2:]):
+            yield p, c, n
 
     @property
     def blocks(self):
@@ -356,7 +373,13 @@ class SegmentList(object):
         return len(self.segments)
 
     def __str__(self):
-        return '\n'.join(str(s) for s in self.segments)
+        t = 0
+        o = ''
+        for i, s in enumerate(self.segments):
+            o += f'{i:3d} {t:>2.4f} ' + str(s) + "\n"
+            t += s.time
+
+        return o
 
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
@@ -374,7 +397,6 @@ class SegmentList(object):
         for seg_n, s in enumerate(self.segments):
             yield seg_n, [b.stepper_blocks() for b in s.blocks]
 
-
     def step(self, details=False):
         from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
         period = DEFAULT_PERIOD
@@ -384,7 +406,7 @@ class SegmentList(object):
 
         steppers = [Stepper(details=details) for _ in self.joints]
 
-        for seg_n,  stepper_blocks in self.stepper_blocks:
+        for seg_n, stepper_blocks in self.stepper_blocks:
 
             for stp, sb in zip(steppers, stepper_blocks):
                 stp.load_phases(sb)
@@ -400,7 +422,6 @@ class SegmentList(object):
                     self.step_positions += np.array(steps)
                     yield [t] + steps
                     t += dt
-
 
     def plot(self, ax=None, axis=None):
         from .plot import plot_trajectory

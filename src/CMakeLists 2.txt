@@ -12,7 +12,7 @@ include(Catch)
 find_package(Boost 1.79.0 REQUIRED COMPONENTS
         filesystem system python310 )
 
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+
 
 if(NOT Boost_FOUND)
     message(FATAL_ERROR "Could not find boost!")
