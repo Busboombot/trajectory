@@ -52,13 +52,11 @@ void Planner::plan(){
     Segment* current = &segments[i];
 
     if (i == 0) {
-        current->plan();
+        //current->plan();
         return;
     }
 
     Segment* prior = &segments[i - 1];
-    prior->plan_ramp();  // Uncap the v_1 for the prior tail
-
 
     for(int p_iter = 0; p_iter < 20; p_iter++){
         // For random moves, only about 10% of the segments will have more than 2
@@ -88,19 +86,16 @@ int Planner::plan_at_boundary(Segment &prior, Segment &current) {
 
     VelocityVector a_v0 = prior.getV0();
 
-    for(int i = 0; i < joints.size(); i++){
-        prior.blocks[i].limitBv(current.blocks[i]);
-    }
 
     cout <<endl<< "Plan@B " << prior.getN() << " " << current.getN() << endl;
 
     cout << "A  P " << prior << endl;
     cout << "A  C " << current << endl;
 
-    prior.plan();
+    //prior.plan();
 
-    current.setBv(prior.getV1(), V_NAN);
-    current.plan() ;
+    //current.setBv(prior.getV1(), V_NAN);
+    //current.plan() ;
 
 
     cout << "B  P " << prior << endl;
@@ -110,8 +105,8 @@ int Planner::plan_at_boundary(Segment &prior, Segment &current) {
     if (current.getV0() != prior.getV1()) {
         // This means that the current could not handle the commanded v_0,
         // so prior will have to yield.
-        prior.setBv(V_NAN, current.getV0());
-        prior.plan();
+        //prior.setBv(V_NAN, current.getV0());
+        //prior.plan();
     }
 
 

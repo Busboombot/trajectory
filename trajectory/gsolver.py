@@ -151,7 +151,7 @@ class ACDBlock:
         self.memo = []
         self.errors = []
 
-    def min_time(self, v_0=None, v_1=None, prior=None):
+    def min_time(self):
         """Return the smallest reasonable time to complete this block"""
 
         # self.set_bv(v_0, v_1, prior)
@@ -193,49 +193,6 @@ class ACDBlock:
             assert not ( (prior is None) ^ (self.segment.prior is None))
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
-
-        self._plan(t)
-
-
-    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
-
-        if v_0 == 'prior' and prior is not None:
-            self.v_0 = prior.v_1
-        elif v_0 is not None:
-            self.v_0 = v_0
-
-        if v_1 == 'next' and next_ is not None:
-            self.v_1 = next_.v_0
-        elif v_1 == 'v_max':
-            self.v_1 = self.joint.v_max
-        elif v_1 is not None:
-            self.v_1 = v_1
-
-        if prior:
-            # If the current block has a different sign -- changes direction --
-            # then the boundary velocity must be zero.
-            if not same_sign(prior.d, self.d) or prior.x == 0 or self.x == 0:
-                self.v_0 = 0
-
-        x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
-        x_d = self.x - x_a
-
-        if x_d < 0:
-            # Basic trapezoid formula, in terms of x instead of t
-            self.v_0 = int(min(self.v_0, sqrt(2 * self.joint.a_max * self.x)))
-            self.v_1 = 0
-        elif self.x == 0:
-            self.v_0 = 0
-            self.v_1 = 0
-        else:
-            self.v_1 = int(min(self.v_1, sqrt(2 * self.joint.a_max * x_d)))
-
-        self.v_0 = min(self.v_0, self.joint.v_max)
-        self.v_1 = min(self.v_1, self.joint.v_max)
-
-        return self.v_0, self.v_1
-
-    def _plan(self, t):
 
         self.t = t
         self.replans += 1
@@ -287,6 +244,47 @@ class ACDBlock:
         assert self.v_1 <= self.joint.v_max
 
         return self
+
+
+    def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
+
+        if v_0 == 'prior' and prior is not None:
+            self.v_0 = prior.v_1
+        elif v_0 is not None:
+            self.v_0 = v_0
+
+        if v_1 == 'next' and next_ is not None:
+            self.v_1 = next_.v_0
+        elif v_1 == 'v_max':
+            self.v_1 = self.joint.v_max
+        elif v_1 is not None:
+            self.v_1 = v_1
+
+        if prior:
+            # If the current block has a different sign -- changes direction --
+            # then the boundary velocity must be zero.
+            if not same_sign(prior.d, self.d) or prior.x == 0 or self.x == 0:
+                self.v_0 = 0
+
+        x_a, t_a = accel_xt(self.v_0, 0, self.joint.a_max)
+        x_d = self.x - x_a
+
+        if x_d < 0:
+            # Basic trapezoid formula, in terms of x instead of t
+            self.v_0 = int(min(self.v_0, sqrt(2 * self.joint.a_max * self.x)))
+            self.v_1 = 0
+        elif self.x == 0:
+            self.v_0 = 0
+            self.v_1 = 0
+        else:
+            self.v_1 = int(min(self.v_1, sqrt(2 * self.joint.a_max * x_d)))
+
+        self.v_0 = min(self.v_0, self.joint.v_max)
+        self.v_1 = min(self.v_1, self.joint.v_max)
+
+        return self.v_0, self.v_1
+
+
 
     def reductions(self, t):
 

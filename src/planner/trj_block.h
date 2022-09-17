@@ -12,12 +12,6 @@ class Segment;
 class Joint;
 class Planner;
 
-enum class BV {
-    PRIOR = -1, // Use the velocity from the previous block
-    NEXT = -2,  // Use the velocity from the next block
-    V_MAX = -3, // Set the velocity to V_MAX for this joint.
-    NA = -4     // Don't change the Boundary Value
-};
 
 class Block {
 
@@ -27,7 +21,6 @@ public:
             x(fabs(static_cast<double>(x))), joint(joint), segment(segment) {
         this->d = sign(x);
     }
-
 
     Block(trj_float_t x, trj_float_t v_0, trj_float_t v_1, const Joint& joint, Segment *segment) :
         Block(static_cast<double>(x), joint, segment){
@@ -55,16 +48,12 @@ private:
     const Joint &joint;
     Segment *segment;
 
-    int recalcs=0;
 
-    int step_period=0;
 
 public:
     void init();
 
-    void plan(trj_float_t t_);
-
-    void plan_ramp(float t_);
+    void plan(trj_float_t t_, int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr);
 
     trj_float_t area();
 
@@ -74,11 +63,11 @@ public:
 
     trj_float_t getT() const;
 
+    trj_float_t getMinTime() const;
+
     void setBv(int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr) ; // Clip the boundary values based on the distance
 
     void limitBv();
-
-    void limitBv(Block& next);
 
     trj_float_t getV0() const;
 
@@ -88,13 +77,12 @@ public:
 
 private:
 
-    trj_float_t consistantize();
 
     void set_zero();
 
-    std::tuple<trj_float_t, trj_float_t> accel_xt(trj_float_t v_i, trj_float_t v_1); // Compute trapezoid for acceleration from v_i to v_1
+    std::tuple<trj_float_t, trj_float_t> accel_xt(trj_float_t v_i, trj_float_t v_1) const; // Compute trapezoid for acceleration from v_i to v_1
 
-    std::tuple<trj_float_t, trj_float_t> accel_acd(trj_float_t v_0_, trj_float_t v_c_, trj_float_t v_1_); // Compute both accel and decel trapezoids
+    std::tuple<trj_float_t, trj_float_t> accel_acd(trj_float_t v_0_, trj_float_t v_c_, trj_float_t v_1_) const; // Compute both accel and decel trapezoids
 
 
 };

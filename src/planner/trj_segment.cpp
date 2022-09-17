@@ -33,6 +33,8 @@ Segment::Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move
 }
 
 
+
+
 void Segment::setBv(vector<double> v_0_, vector<double> v_1_) {
 
     for (int i = 0; i < blocks.size(); i++) {
@@ -46,38 +48,57 @@ void Segment::setBv(double v_0_, double v_1_) {
     }
 }
 
-void Segment::plan() {
 
-    for (Block &b: this->blocks) {
-        t = fmax(t, b.getT());
+void Segment::plan(trj_float_t t_, int v_0_, int v_1_, Segment *prior, Segment *next) {
+
+    Block *prior_block = nullptr;
+    Block *next_block = nullptr;
+
+    trj_float_t largest_at = 0, mt=0;
+
+    for (const Joint &j: this->joints) {
+        largest_at = fmax(largest_at, j.max_at);
     }
 
-    for (Block &b: this->blocks) {
-        b.plan(t);
+    for(int p_iter=0; p_iter<15; p_iter++){
+        if (t != 0){
+            mt = t_;
+        } else if (p_iter <2) {
+            mt = fmax(largest_at*2, min_time());
+        } else {
+            mt = fmax(largest_at*2, time());
+        }
+
+        for(int i=0; i<blocks.size(); i++) {
+            Block &b = blocks[i];
+            if (prior != nullptr) prior_block = &prior->blocks[i];
+            if (next != nullptr) next_block = &next->blocks[i];
+
+            b.plan(mt, v_0_, v_1_, prior_block, next_block);
+        }
     }
+}
+
+trj_float_t  Segment::min_time(){
+
+    trj_float_t mt=0;
+
+    for(Block &b : blocks){
+        mt = fmax(mt,b.getMinTime());
+    }
+
+    return mt;
 
 }
 
-void Segment::plan(double v_0_, double v_1_) {
-    setBv(v_0_, v_1_);
-    plan();
-}
+trj_float_t  Segment::time(){
+    trj_float_t mt=0;
 
-void Segment::plan(vector<double> v_0_, vector<double> v_1_) {
-    setBv(std::move(v_0_), std::move(v_1_));
-    plan();
-}
-
-void Segment::plan_ramp() {
-
-    for (Block &b: this->blocks) {
-        t = fmax(t, b.getT());
+    for(Block &b : blocks){
+        mt = fmax(mt,b.getT());
     }
 
-    for (Block &b: this->blocks) {
-        b.plan_ramp(t);
-    }
-
+    return mt;
 }
 
 MoveType Segment::getMoveType() const {

@@ -8,9 +8,10 @@
 
 #include "trj_segment.h"
 #include "trj_joint.h"
+#include "trj_types.h"
 
 
-TEST_CASE("Basic Segment and Block test", "[planner]")
+TEST_CASE("Basic Segment and Block test", "[block]")
 {
     Joint j(0, 5e3, 50e3);
 
@@ -18,7 +19,7 @@ TEST_CASE("Basic Segment and Block test", "[planner]")
 
     std::cout << s << std::endl;
 
-    s.plan(NAN, NAN);
+    s.plan(0, BV_NAN, BV_NAN);
 
     std::cout << s << std::endl;
 

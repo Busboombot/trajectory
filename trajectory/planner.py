@@ -82,13 +82,15 @@ class Segment(object):
         # Planning can change the time for a block, so planning multiple
         # will ( should ) converge on a singe segment time.
 
+        largest_at = max([j.max_at for j in self.joints])
+
         for p_iter in range(iter):  # Rarely more than 1 iteration
             if t is not None:
                 mt = t
             elif p_iter < 2:
-                mt = max(0.04, self.min_time)
+                mt = max(largest_at * 2, self.min_time)
             else:
-                mt = max(0.04, self.time)
+                mt = max(largest_at * 2, self.time)
 
             for i, b in enumerate(self.blocks):
                 pb = prior.blocks[i] if prior is not None else None

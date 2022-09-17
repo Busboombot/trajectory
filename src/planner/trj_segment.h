@@ -39,13 +39,7 @@ public:
     Segment(uint32_t n, const std::vector<Joint>&  joints, MoveArray moveS );
     Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move );
 
-    void plan();
-
-    void plan(double v_i, double v_f);
-
-    void plan(VelocityVector v_0_, VelocityVector v_1_);
-
-    void plan_ramp();
+    void plan(trj_float_t t_, int v_0_, int v_1_, Segment *prior = nullptr, Segment *next = nullptr);
 
     void setBv(double v_0, double v_1);
 
@@ -62,7 +56,8 @@ public:
 
     int getN() const { return n; }
 
-
+    trj_float_t min_time();
+    trj_float_t time();
 
     friend Planner;
 
