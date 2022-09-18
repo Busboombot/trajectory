@@ -10,6 +10,7 @@
 #include "trj_joint.h"
 #include "trj_types.h"
 
+using namespace std;
 
 TEST_CASE("Basic Segment and Block test", "[block]")
 {
@@ -17,19 +18,19 @@ TEST_CASE("Basic Segment and Block test", "[block]")
 
     Segment s(0,{j, j}, {5000, 1000});
 
-    std::cout << s << std::endl;
+    std::cout << s << endl<< endl;
 
     s.plan(0, BV_NAN, BV_NAN);
 
-    std::cout << s << std::endl;
+    std::cout << s << endl<< endl;
 
     s.setBv(0, 0);
 
-    std::cout << s << std::endl;
+    std::cout << s << endl<< endl;
 
     s.setBv(j.v_max, j.v_max);
 
-    std::cout << s << std::endl;
+    std::cout << s << endl<< endl;
 
 }
 

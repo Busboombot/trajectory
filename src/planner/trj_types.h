@@ -22,7 +22,7 @@ enum class MoveType {
     home
 };
 
-constexpr trj_float_t BV_PRIOR = -1.;
-constexpr trj_float_t BV_NEXT = -2.;
-constexpr trj_float_t BV_V_MAX = -3.;
-constexpr trj_float_t BV_NAN = NAN;
+constexpr int BV_PRIOR = -1;
+constexpr int BV_NEXT = -2;
+constexpr int BV_V_MAX = -3;
+constexpr int BV_NAN = -4;

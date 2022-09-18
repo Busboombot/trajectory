@@ -27,5 +27,6 @@ endif ()
 
 add_subdirectory(planner)
 add_subdirectory(python)
+add_subdirectory(cli)
 
 enable_testing()

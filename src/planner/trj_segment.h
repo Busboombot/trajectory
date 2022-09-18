@@ -41,9 +41,9 @@ public:
 
     void plan(trj_float_t t_, int v_0_, int v_1_, Segment *prior = nullptr, Segment *next = nullptr);
 
-    void setBv(double v_0, double v_1);
+    void setBv(int v_0, int v_1);
 
-    void setBv(VelocityVector v_0_, VelocityVector v_1_);
+    void setBv(vector<int> v_0_, vector<int> v_1_);
 
 public:
 

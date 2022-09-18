@@ -66,16 +66,20 @@ class Segment(object):
 
         self.n = n
         self.joints = joints
-        self.move = move
 
-        if prior is not None:
-            self.prior = prior
-            self.blocks = [j.new_block(x=x, v_0=pb.v_1, v_1=0) for j, x, pb in zip(self.joints, move, prior.blocks)]
+        if isinstance(move[0], ACDBlock):
+            self.blocks = move
+            self.move = [b.x for b in self.blocks]
         else:
-            self.blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, move)]
+            self.move = move
+            if prior is not None:
+                self.prior = prior
+                self.blocks = [j.new_block(x=x, v_0=pb.v_1, v_1=0) for j, x, pb in zip(self.joints, move, prior.blocks)]
+            else:
+                self.blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, move)]
 
-        for b in self.blocks:
-            b.segment = self
+            for b in self.blocks:
+                b.segment = self
 
     def plan(self, v_0=None, v_1=None, prior=None, next_=None, t=None, iter=10):
 

@@ -428,12 +428,12 @@ class ACDBlock:
     def str(self):
         from colors import color, bold
 
-        v0 = color(f"{int(self.v_0):<5d}", fg='green')
-        xa = bold(f"{int(self.d * self.x_a):>6d}")
-        c = bold(f"{int(round(self.d * self.x_c)):>6d}")
+        v0 = color(f"{int(self.v_0):<5d}", fg='blue')
+        xa = color(bold(f"{int(self.d * self.x_a):>6d}"), fg='green')
+        c = color(bold(f"{int(round(self.d * self.x_c)):>6d}"), fg='green')
         vc = color(f"{int(self.v_c):<6d}", fg='blue')
-        xd = bold(f"{int(self.d * self.x_d):<6d}")
-        v1 = color(f"{int(self.v_1):>5d}", fg='red')
+        xd = color(bold(f"{int(self.d * self.x_d):<6d}"), fg='green')
+        v1 = color(f"{int(self.v_1):>5d}", fg='blue')
 
         return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
 
