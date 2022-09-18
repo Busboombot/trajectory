@@ -62,8 +62,6 @@ void Planner::plan(){
         // For random moves, only about 10% of the segments will have more than 2
         // iterations, and 1% more than 10.
 
-        cout << "Plan " << i << " " << p_iter << " seg=" <<  current->getN() << endl;
-
         if (i >= segments.size() ){
             break;
         }
@@ -87,19 +85,10 @@ int Planner::plan_at_boundary(Segment &prior, Segment &current) {
     VelocityVector a_v0 = prior.getV0();
 
 
-    cout <<endl<< "Plan@B " << prior.getN() << " " << current.getN() << endl;
-
-    cout << "A  P " << prior << endl;
-    cout << "A  C " << current << endl;
-
     //prior.plan();
 
     //current.setBv(prior.getV1(), V_NAN);
     //current.plan() ;
-
-
-    cout << "B  P " << prior << endl;
-    cout << "B  C " << current << endl;
 
 
     if (current.getV0() != prior.getV1()) {
@@ -108,11 +97,6 @@ int Planner::plan_at_boundary(Segment &prior, Segment &current) {
         //prior.setBv(V_NAN, current.getV0());
         //prior.plan();
     }
-
-
-    cout << "C  P " << prior << endl;
-    cout << "C  C " << current << endl;
-
 
 
     if (a_v0 != prior.getV0() || boundary_error(prior, current) > 1) {
@@ -160,21 +144,41 @@ bool Planner::isEmpty() { return segments.size() == 0; }
 ostream &operator<<(ostream &output, const Planner &p) {
 
 
-    cout << blue_bg << "════  Joints ════" << creset << endl;
+    output << blue_bg << "════  Joints ════" << creset << endl;
+
+    cout << "N Joints:  " << p.joints.size() << endl;
+
     for (const Joint j: p.joints) {
         output << j ;
     }
 
-    cout << endl << blue_bg << "════ Segments ════" << creset << endl;
+
+    output << endl << blue_bg << "════ Segments ════" << creset << endl;
 
     for (const Segment& s: p.segments) {
         output << s << endl;
     }
 
-
-
-
     return output;
 }
+
+
+json Planner::dump() const{
+
+    json j;
+
+    j["_type"] = "Planner";
+    for (const Joint joint: joints) {
+        j["joints"].push_back(joint.dump());
+    }
+
+    for (const Segment& s: segments) {
+        j["segments"].push_back(s.dump());
+    }
+
+
+    return j;
+}
+
 
 

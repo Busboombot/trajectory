@@ -1,0 +1,5 @@
+add_test( [==[Basic Segment and Block test]==] /Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test/test_planner [==[Basic Segment and Block test]==]  )
+set_tests_properties( [==[Basic Segment and Block test]==] PROPERTIES WORKING_DIRECTORY /Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test)
+add_test( [==[Basic Planner Test]==] /Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test/test_planner [==[Basic Planner Test]==]  )
+set_tests_properties( [==[Basic Planner Test]==] PROPERTIES WORKING_DIRECTORY /Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test)
+set( test_planner_TESTS [==[Basic Segment and Block test]==] [==[Basic Planner Test]==])

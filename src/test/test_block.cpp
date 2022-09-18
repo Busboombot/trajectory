@@ -32,6 +32,9 @@ TEST_CASE("Basic Segment and Block test", "[block]")
 
     std::cout << s << endl<< endl;
 
+
+    std::cout << s.dump() << endl<< endl;
+
 }
 
 

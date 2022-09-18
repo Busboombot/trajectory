@@ -3,6 +3,9 @@
 #include "trj_segment.h"
 #include "trj_block.h"
 
+using json = nlohmann::json;
+
+
 ostream &operator<<(ostream &output, const Segment &s) {
 
     output << setw(6) << setprecision(4) << s.t << " ";
@@ -13,6 +16,7 @@ ostream &operator<<(ostream &output, const Segment &s) {
 
     return output;
 }
+
 
 Segment::Segment(uint32_t n, const std::vector<Joint>&  joints, MoveArray move ) :
         n(n), t(0), joints(joints), moves(std::move(move)) {
@@ -126,3 +130,17 @@ VelocityVector Segment::getV1() {
 
     return vv;
 }
+
+json Segment::dump() const{
+
+    vector<json> o;
+    json j;
+
+    j["_type"]="Segment";
+    for(const Block &b: blocks){
+       j["blocks"].push_back(b.dump());
+    }
+
+    return j;
+}
+

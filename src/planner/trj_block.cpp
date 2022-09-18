@@ -10,6 +10,8 @@
 #include "trj_joint.h"
 #include "trj_segment.h"
 
+using json = nlohmann::json;
+
 trj_float_t plan_err_f(trj_float_t x, trj_float_t t, trj_float_t v_0, trj_float_t v_c, trj_float_t v_1, trj_float_t a) {
 
     trj_float_t t_a, t_d, x_a, x_d, t_c, x_c;
@@ -352,7 +354,27 @@ trj_float_t Block::getV1() const {
     return v_1;
 }
 
+json Block::dump() const{
 
+    json m;
+
+    m["_type"]="Block";
+    m["x"]=x;
+    m["d"]=d;
+    m["t"]=t;
+    m["t_a"]=t_a;
+    m["t_c"]=t_c;
+    m["t_d"]=t_d;
+    m["x_a"]=x_a;
+    m["x_c"]=x_c;
+    m["x_d"]=x_d;
+    m["v_0"]=v_0;
+    m["v_c"]=v_c;
+    m["v_1"]=v_1;
+
+    return m;
+
+}
 
 
 

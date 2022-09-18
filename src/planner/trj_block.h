@@ -4,6 +4,12 @@
 #include <iostream>
 #include "trj_util.h"
 #include "trj_types.h"
+#include <map>
+#include "json.hpp"
+
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 using namespace std;
 using std::ostream;
@@ -72,6 +78,8 @@ public:
     trj_float_t getV0() const;
 
     trj_float_t getV1() const;
+
+    json dump() const;
 
     friend Planner;
 

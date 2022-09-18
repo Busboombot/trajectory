@@ -1,0 +1,5 @@
+if(EXISTS "/Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test/test_planner_tests-b12d07c.cmake")
+  include("/Users/eric/Documents/proj/trajectory/src/cmake-cli-test/test/test_planner_tests-b12d07c.cmake")
+else()
+  add_test(test_planner_NOT_BUILT-b12d07c test_planner_NOT_BUILT-b12d07c)
+endif()

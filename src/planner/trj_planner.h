@@ -16,6 +16,8 @@
 #include "trj_segment.h"
 #include "trj_joint.h"
 #include "trj_types.h"
+#include "json.hpp"
+
 
 using std::array;
 using std::cout;
@@ -24,7 +26,7 @@ using std::setw;
 using std::left;
 using std::right;
 using std::ostream;
-
+using json = nlohmann::json;
 
 class Segment;
 class Joint;
@@ -88,8 +90,9 @@ public:
 
     const Joint &getJoint(int i){ return joints[i];}
 
-
     friend ostream &operator<<( ostream &output, const Planner &p );
+
+    json dump() const;
 
 private:
 

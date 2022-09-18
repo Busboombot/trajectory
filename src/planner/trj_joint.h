@@ -8,6 +8,9 @@
 #include <cmath> // rint
 #include "trj_planner_const.h"
 #include "trj_types.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 class Joint {
 
@@ -33,4 +36,7 @@ public:
 
     friend std::__1::ostream &operator<<(std::__1::ostream &output, const Joint &j );
 
+    json dump() const;
+
 };
+

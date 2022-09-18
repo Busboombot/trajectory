@@ -9,9 +9,11 @@
 #include "trj_move.h"
 #include "trj_joint.h"
 #include "trj_types.h"
+#include "json.hpp"
 
 
 using namespace std;
+using json = nlohmann::json;
 
 class Planner;
 
@@ -62,4 +64,8 @@ public:
     friend Planner;
 
     friend ostream &operator<<( ostream &output, const Segment &s );
+
+    json dump() const;
+
+
 };

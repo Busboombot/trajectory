@@ -1,17 +1,13 @@
 
 cmake_minimum_required(VERSION 3.23)
 
-project(planner_tests LANGUAGES CXX)
+project(trj_planner LANGUAGES CXX)
 set (CMAKE_CXX_STANDARD 11)
 
-
 set( SOURCES_TESTS
-        cli.cpp
-        )
+        cli.cpp)
 
-add_executable(test_planner ${SOURCES_TESTS} )
+add_executable(trj_planner ${SOURCES_TESTS} )
 
-target_link_libraries(test_planner PRIVATE Catch2::Catch2WithMain planner)
-
-catch_discover_tests(test_planner)
+target_link_libraries(trj_planner PRIVATE  planner)
 

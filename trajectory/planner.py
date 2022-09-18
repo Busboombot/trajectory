@@ -49,7 +49,6 @@ def index_clip(n, l):
 
     return n
 
-
 class Segment(object):
     """One segment, for all joints"""
 

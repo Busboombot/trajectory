@@ -6,7 +6,10 @@ set (CMAKE_CXX_STANDARD 11)
 
 
 set( SOURCES_TESTS
-        cli.cpp
+        test.cpp
+        test_basic.cpp
+        test_block.cpp
+        test_planner.cpp
 )
 
 add_executable(test_planner ${SOURCES_TESTS} )
