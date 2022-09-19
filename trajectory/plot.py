@@ -47,10 +47,15 @@ def plot_axis(df, axis, ax=None):
 
     ax = t[['v']].plot(ax=ax)
 
+
+    # Draw dotted lines for phase boundaries
     for t, row in t.iterrows():
         # rectangle = plt.Rectangle((idx,0), row.del_t, row.v_f, fc=cm[row.ss], alpha=0.05)
         # plt.gca().add_patch(rectangle)
         ax.axvline(x=t, color='k', alpha=.5, lw=.5, linestyle='dotted')
+
+    for idx, t in df.groupby('seg').t.min().iteritems():
+        ax.axvline(x=t, color='r', lw=1, linestyle='dashed')
 
     if discontinuities[0]:
         warn(f"Found {discontinuities[0]} discontinuities in axis {axis}")
@@ -99,7 +104,6 @@ def plot_params_df(*args):
     if len(seg_0):
         segments = [seg_0] + segments
 
-
     rows = []
     for i, seg in enumerate(segments):
         for j, p in enumerate(seg):
@@ -113,7 +117,6 @@ def plot_params_df(*args):
 
     return df
 
-
 def plot_params(*args, ax=None):
 
     if ax is None:
@@ -123,7 +126,6 @@ def plot_params(*args, ax=None):
     plot_trajectory(df, ax=ax)
 
     return ax
-
 
 def seg_step(sl, details=None):
     """Produce a dataset by stepping through a segment list"""

@@ -40,11 +40,19 @@ def report(sl):
 
     h = (f"""
     <table>
-    <tr><td>N Discont</td>  <td>{len(list(sl.discontinuities()))}</td></tr>
-    <tr><td>Replans</td>    <td>{Counter(sl.replans).most_common(10)}</td></tr>
-    <tr><td>N Replans</td>  <td>{sum([b.replans for b in  sl.blocks])}</td></tr>
-    <tr><td>Errors</td>     <td>{Counter(chain(*[b.errors for b in sl.blocks])).most_common(10)}</td></tr>
-    <tr><td>Reductions</td> <td>{Counter(chain(*[b.reductions for b in sl.blocks])).most_common(10)}</td></tr>
+    <tr>
+        <td><b>N Discont</b></td>  <td>{len(list(sl.discontinuities()))}</td>
+        <td><b>N Replans</b></td>  <td>{sum([b.replans for b in  sl.blocks])}</td>
+        <td><b>Errors</b></td>     <td>{Counter(chain(*[b.errors for b in sl.blocks])).most_common(10)}</td>
+    </tr>
+    <tr>
+        <td><b>Reductions</b></td> <td>{Counter(chain(*[b.reductions for b in sl.blocks])).most_common(10)}</td>
+        <td><b>Replans</b></td>    <td>{Counter(sl.replans).most_common(10)}</td>
+        <td><b>Time Err</b></td>     <td>{sum([s.times_e_rms for s in sl]):2.4f}</td>
+    </tr>
+
     </table>""")
 
     display(HTML(h))
+    
+    

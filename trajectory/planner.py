@@ -49,6 +49,7 @@ def index_clip(n, l):
 
     return n
 
+
 class Segment(object):
     """One segment, for all joints"""
 
@@ -86,14 +87,17 @@ class Segment(object):
         # will ( should ) converge on a singe segment time.
 
         largest_at = max([j.max_at for j in self.joints])
+        lower_bound_time = largest_at * 2
 
         for p_iter in range(iter):  # Rarely more than 1 iteration
             if t is not None:
                 mt = t
             elif p_iter < 2:
-                mt = max(largest_at * 2, self.min_time)
+                mt = self.min_time
+            elif p_iter < 4:
+                mt = max(lower_bound_time, self.min_time)
             else:
-                mt = max(largest_at * 2, self.time)
+                mt = max(lower_bound_time, self.time)
 
             for i, b in enumerate(self.blocks):
                 pb = prior.blocks[i] if prior is not None else None
@@ -103,6 +107,8 @@ class Segment(object):
 
             if self.times_e_rms < .001:
                 break
+            else:
+                self.limit_bv()
 
         return self
 
@@ -123,6 +129,13 @@ class Segment(object):
         """Calculated maximum of the  minimum time for each block in the segment"""
         return max([b.min_time() for b in self.blocks])
 
+    def limit_bv(self):
+        mt = self.min_time
+
+        for b in self.blocks:
+            if b.t < mt:
+                b.limit_bv()
+
     @property
     def dominant(self):
         x = list(reversed(sorted([(b.min_time(), i) for i, b in enumerate(self.blocks)])))
@@ -133,10 +146,7 @@ class Segment(object):
         """Compute the RMS difference of the times from the mean time"""
         import numpy as np
 
-        # Ignore really small axis for this calculation, because
-        # they are very troublesome, and errors in them wont make a
-        # big difference
-        times = [round(b.t, 6) for b in self.blocks if b.x > 100]
+        times = [round(b.t, 6) for b in self.blocks]
 
         if not times:
             times = [0]
@@ -258,7 +268,7 @@ class SegmentList(object):
     def plan(self, i: int = None):
 
         if i is None:
-            i = len(self.segments)-1
+            i = len(self.segments) - 1
 
         for p_idx in range(15):
 
@@ -268,8 +278,8 @@ class SegmentList(object):
 
             assert prior == current.prior, (i, prior.n, current.prior.n)
 
-            prior.plan(  v_1='next',  prior=pre_prior, next_=current)  # Plan a first
-            current.plan(v_0='prior', prior=prior )  # Plan b with maybe changed velocities from a
+            prior.plan(v_1='next', prior=pre_prior, next_=current)  # Plan a first
+            current.plan(v_0='prior', prior=prior)  # Plan b with maybe changed velocities from a
 
             # Smooth out boundary bumps between segments.
             def v_limit(p_idx, v_max):
@@ -307,7 +317,7 @@ class SegmentList(object):
     @property
     def edist(self):
         """Euclidean distances"""
-        return [ np.sqrt(np.sum(np.square(s.move))) for s in self.segments]
+        return [np.sqrt(np.sum(np.square(s.move))) for s in self.segments]
 
     def boundary_error(self, p, c):
         return math.sqrt(sum([(pb.v_1 - cb.v_0) ** 2 for pb, cb in zip(p.blocks, c.blocks)]))

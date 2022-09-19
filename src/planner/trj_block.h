@@ -73,7 +73,6 @@ public:
 
     void setBv(int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr) ; // Clip the boundary values based on the distance
 
-    void limitBv();
 
     trj_float_t getV0() const;
 

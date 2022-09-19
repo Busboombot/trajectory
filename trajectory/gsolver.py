@@ -4,7 +4,7 @@ from math import sqrt
 import pandas as pd
 
 from .exceptions import TrapMathError
-from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
+from .stepper import DEFAULT_PERIOD, Stepper
 
 
 def binary_search(f, v_min, v_guess, v_max):
@@ -150,6 +150,7 @@ class ACDBlock:
         self.reductions = []
         self.memo = []
         self.errors = []
+        self.reduction_step = 0
 
     def min_time(self):
         """Return the smallest reasonable time to complete this block"""
@@ -181,16 +182,14 @@ class ACDBlock:
         x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
         t_c = (self.x - x_ad) / v_c if v_c != 0 else 0
 
-        t_c = max(t_c, t_ad/2) # Enforce 1/3 rule, each a,c,d is 1/3 of total time
+        t_c = max(t_c, t_ad / 2)  # Enforce 1/3 rule, each a,c,d is 1/3 of total time
 
-        self.t = t_c + t_ad
-
-        return self.t
+        return t_c + t_ad
 
     def plan(self, t, v_0=None, v_1=None, prior=None, next_=None, iter=None):
 
         if self.segment is not None:
-            assert not ( (prior is None) ^ (self.segment.prior is None))
+            assert not ((prior is None) ^ (self.segment.prior is None))
 
         self.set_bv(v_0=v_0, v_1=v_1, prior=prior, next_=next_)
 
@@ -245,7 +244,6 @@ class ACDBlock:
 
         return self
 
-
     def set_bv(self, v_0=None, v_1=None, prior=None, next_=None):
 
         if v_0 == 'prior' and prior is not None:
@@ -284,10 +282,30 @@ class ACDBlock:
 
         return self.v_0, self.v_1
 
+    def limit_bv(self):
+
+        if self.v_1 > self.joint.v_max / 2:
+            self.v_1 //= 2
+            self.reductions.append('V1A')
+            return
+
+        if self.v_0 > self.joint.v_max / 2:
+            self.v_0 //= 2
+            self.reductions.append('V0A')
+            return
+
+        if self.v_1 > 1:
+            self.v_1 //= 2
+            self.reductions.append('V1B')
+            return
+
+        if self.v_0 > 1:
+            self.v_0 //= 2
+            self.reductions.append('V0B')
+            return
 
 
     def reductions(self, t):
-
         def has_error(b, t):
             assert round(b.x_c) >= 0
             assert not (b.x > 25 and abs(round(b.area) - b.x) > 1)
@@ -339,13 +357,14 @@ class ACDBlock:
         self.v_0 = self.v_c = self.v_1 = 0
         self.t = 0
 
+
     @property
     def is_dominant(self):
-
         if not self.segment:
             return False
 
         return self.segment.dominant == self.joint.n
+
 
     @property
     def dominant(self):
@@ -353,6 +372,7 @@ class ACDBlock:
             return False
 
         return self.segment.blocks[self.segment.dominant]
+
 
     @property
     def area(self):
@@ -373,9 +393,9 @@ class ACDBlock:
 
         return x_ad + x_c
 
+
     @property
     def dataframe(self):
-
         rows = []
         d = self.d
         rows.append({'t': None, 'seg': 0, 'axis': 0,
@@ -387,30 +407,32 @@ class ACDBlock:
 
         return pd.DataFrame(rows)
 
+
     def asdict(self):
         return asdict(self)
 
+
     def replace(self, **kwds):
         return replace(self, **kwds)
+
 
     def plot(self, ax=None):
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-    def stepper_blocks(self):
 
+    def stepper_blocks(self):
         def ri(v):
             return int(round(v))
 
         return (
-           (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
-           (ri(self.d * self.x_c), ri(self.d * self.v_c), ri(self.d * self.v_c)),
-           (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
+            (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
+            (ri(self.d * self.x_c), ri(self.d * self.v_c), ri(self.d * self.v_c)),
+            (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
         )
 
 
-    def step(self,  period=DEFAULT_PERIOD, details=False):
-
+    def step(self, period=DEFAULT_PERIOD, details=False):
         stp = Stepper(period, details=details)
 
         t = 0
@@ -425,6 +447,7 @@ class ACDBlock:
 
             t += period
 
+
     def str(self):
         from colors import color, bold
 
@@ -436,6 +459,7 @@ class ACDBlock:
         v1 = color(f"{int(self.v_1):>5d}", fg='blue')
 
         return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
+
 
     def _repr_pretty_(self, p, cycle):
         p.text(self.str() if not cycle else '...')
