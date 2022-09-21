@@ -14,7 +14,7 @@ python3_add_library(pyplan  test.cpp)
 
 target_link_libraries(pyplan PUBLIC
         ${Boost_LIBRARIES}
-        planner
+        libplanner
         ${PYTHON_LIBRARIES}
 
         )

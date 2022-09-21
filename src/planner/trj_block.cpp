@@ -5,6 +5,7 @@
 #include <algorithm>    // std::min
 #include <strstream>
 #include <sstream>
+#include <assert.h>
 
 #include "trj_block.h"
 #include "trj_joint.h"
@@ -12,20 +13,19 @@
 
 using json = nlohmann::json;
 
-trj_float_t plan_err_f(trj_float_t x, trj_float_t t, trj_float_t v_0, trj_float_t v_c, trj_float_t v_1, trj_float_t a) {
+trj_float_t plan_err_f(trj_float_t x, trj_float_t t, trj_float_t v_0,
+                       trj_float_t v_c, trj_float_t v_1, trj_float_t a) {
 
-    trj_float_t t_a, t_d, x_a, x_d, t_c, x_c;
+    trj_float_t t_a, t_d, x_a, x_d, t_c, x_c, t_ad, x_ad;
 
-    t_a = fabs(v_0 - v_1) / a;  // Time to change from v0 to v1 at max acceleration
-    x_a = (v_0 + v_1) / 2 * t_a;
+    t_ad = (fabs(v_c - v_0) + fabs(v_c - v_1)) / a;
+    x_ad = fabs((pow(v_0, 2) - pow(v_c, 2)) / (2. * a)) +
+           abs((pow(v_1, 2) - pow(v_c, 2)) / (2. * a));
 
-    t_d = fabs(v_1 - v_c) / a;  // Time to change from v0 to v1 at max acceleration
-    x_d = (v_c + v_1) / 2 * t_d;
-
-    t_c = fmax(t - (t_a + t_d), 0);
+    t_c = fmax(t - (t_ad), 0);
     x_c = fmax(v_c, 0) * t_c;
 
-    return x - (x_a + x_c + x_d);
+    return x - (x_ad + x_c);
 }
 
 trj_float_t plan_ramp_err_f(trj_float_t x, trj_float_t v_0, trj_float_t v_c, trj_float_t v_1, trj_float_t a) {
@@ -91,38 +91,6 @@ void Block::set_zero() {
 
 }
 
-
-void Block::init() {
-
-
-    setBv(0, 0, nullptr, nullptr);
-
-    v_0 = fmin(v_0, joint.v_max);
-    v_1 = fmin(v_1, joint.v_max);
-
-
-    if (x == 0) {
-        v_c = v_0 = v_1 = 0;
-    } else if (x < 2. * joint.small_x) {
-
-        v_c = (sqrt(4. * joint.a_max * x + 2. * pow(v_0, 2) + 2. * pow(v_1, 2.)) / 2.);
-    } else {
-        v_c = joint.v_max;
-    }
-
-    tie(x_a, t_a) = accel_xt(v_0, v_c);
-    tie(x_d, t_d) = accel_xt(v_c, v_1);
-
-    x_c = x - (x_a + x_d);
-
-    if (v_c != 0) {
-        t_c = x_c / v_c;
-    } else {
-        t_c = 0;
-    }
-
-    t = t_a + t_c + t_d;
-}
 
 tuple<trj_float_t, trj_float_t> Block::accel_xt(trj_float_t v_i, trj_float_t v_f) const {
     // Distance and time required to accelerate from v0 to v1 at
@@ -192,8 +160,11 @@ trj_float_t Block::getMinTime() const {
     if (x == 0) {
         v_c_ = 0;
 
-    } else if (x < 2 * joint.small_x) {
-        v_c_ = (sqrt(4. * joint.a_max * x + 2. * pow(v_0, 2) + 2. * pow(v_1,2.)) / 2);
+    } else if (x < 2.* joint.small_x) {
+        v_c_ = (sqrt(4. * joint.a_max * x +
+                     2. * pow(v_0, 2) +
+                     2. * pow(v_1, 2.)
+                     ) / 2);
 
     } else {
         // If there is more area than the triangular profile for these boundary
@@ -203,10 +174,12 @@ trj_float_t Block::getMinTime() const {
         v_c_ = joint.v_max;
     }
 
-    tie(x_ad_, t_ad_) = accel_acd(v_0, v_c, v_1);
-    if (v_c_ != 0){
+
+    tie(x_ad_, t_ad_) = accel_acd(v_0, v_c_, v_1);
+
+    if (v_c_ != 0) {
         t_c_ = (x - x_ad_) / v_c_;
-    } else{
+    } else {
         t_c_ = 0;
     }
 
@@ -217,9 +190,16 @@ trj_float_t Block::getMinTime() const {
 
 void Block::plan(trj_float_t t_, int v_0_, int v_1_, Block *prior, Block *next) {
 
-    setBv(v_0, v_1, prior, next);
+    trj_float_t v_c_;
 
-    t = t_;
+    if (isnan(t_)) {
+        t = getMinTime();
+    } else {
+        t = t_;
+    }
+
+    setBv((int) v_0_, (int) v_1_, prior, next);
+
 
     if (x == 0 || t == 0) {
         set_zero();
@@ -229,14 +209,16 @@ void Block::plan(trj_float_t t_, int v_0_, int v_1_, Block *prior, Block *next) 
 
     // Find v_c with a binary search, then patch it up if the selection changes the segment time.
 
-    auto err = [this](float v_c) {
+    auto err = [this](float v_c_) {
 
-        trj_float_t err = plan_err_f(x, t, v_0, v_c, v_1, joint.a_max);
-
+        trj_float_t err = plan_err_f(x, t, v_0, v_c_, v_1, joint.a_max);
         return err;
     };
 
-    v_c = fmin(binary_search(err, 0, x / t, joint.v_max), joint.v_max);
+    v_c_ = fmin(binary_search(err, 0, x / t, joint.v_max), joint.v_max);
+
+
+    v_c = fmin(v_c_, joint.v_max);
 
     tie(x_a, t_a) = accel_xt(v_0, v_c);
     tie(x_d, t_d) = accel_xt(v_c, v_1);
@@ -244,12 +226,12 @@ void Block::plan(trj_float_t t_, int v_0_, int v_1_, Block *prior, Block *next) 
     // consistantize will make the values consistent with each other,
     // and if anything is wrong, it will show up in a negative x_c
 
-    x_c = (int) x - (int) (x_a + x_d);
+    x_c =  x - (x_a + x_d);
 
     t_a = abs((v_c - v_0) / joint.a_max);
     t_d = abs((v_c - v_1) / joint.a_max);
 
-    if (round(x_c) == 0) { // get rid of small negatives
+    if (round(x_c) == 0 and x_c < 0) { // get rid of small negatives
         x_c = 0;
     }
 
@@ -268,13 +250,18 @@ void Block::setBv(int v_0_, int v_1_, Block *prior, Block *next) {
 
     trj_float_t x_a_, t_a_;
 
-    if (v_0 == (int) BV_PRIOR && prior != nullptr) {
+    assert(v_0_ != BV_NEXT);
+    assert(v_1_ != BV_PRIOR);
+
+    if (v_0_ == (int) BV_PRIOR) {
+        assert(prior != nullptr);
         v_0 = prior->v_1;
     } else if (v_0_ != (int) BV_NAN) {
         v_0 = v_0_;
     }
 
-    if (v_1_ == (int) BV_NEXT && next != nullptr) {
+    if (v_1_ == (int) BV_NEXT) {
+        assert(next != nullptr);
         v_1 = next->v_0;
     } else if (v_1_ == (int) BV_V_MAX) {
         v_1 = this->joint.v_max;
@@ -291,22 +278,75 @@ void Block::setBv(int v_0_, int v_1_, Block *prior, Block *next) {
     }
 
     tie(x_a_, t_a_) = accel_xt(v_0, 0);
-    trj_float_t x_d_ = x - x_a;
+    trj_float_t x_d_ = x - x_a_;
 
     if (x_d_ < 0) {
         v_0 = int(min(v_0, sqrt(2.0 * joint.a_max * static_cast< double >(x))));
         v_1 = 0;
+
     } else if (x == 0) {
         v_0 = 0;
         v_1 = 0;
+
     } else {
-        v_1 = int(min(v_1, sqrt(2.0 * joint.a_max * x_d)));
+        v_1 = int(min(v_1, sqrt(2.0 * joint.a_max * x_d_)));
+
     }
 
     v_0 = min(v_0, joint.v_max);
     v_1 = min(v_1, joint.v_max);
 
 }
+
+void Block::limitBv() {
+    if (v_1 > joint.v_max / 2) {
+        v_1 /= 2;
+        return;
+    }
+
+    if (v_0 > joint.v_max / 2) {
+        v_0 /= 2;
+        return;
+    }
+
+    if (v_1 > 1) {
+        v_1 /= 2;
+        return;
+    }
+
+    if (v_0 > 1) {
+        v_0 /= 2;
+        return;
+    }
+}
+
+bool Block::bent(Block& prior, Block &current) {
+    int cd = current.d;
+    int pd = prior.d;
+
+    int s1 = sign(pd * prior.v_c - pd * prior.v_1);
+    int s2 = sign(cd * current.v_0 - cd * current.v_c);
+
+    return (s1 * s2) < 0;
+}
+
+
+trj_float_t Block::meanBv(Block& prior, Block &next) {
+
+    trj_float_t a;
+    trj_float_t  mv;
+
+    if (prior.t_d + next.t_a != 0){
+        a = (next.v_c - prior.v_c) / (prior.t_d + next.t_a);
+        mv = prior.v_c + a*prior.t_d;
+    } else  {
+        mv =  ( next.v_c +  prior.v_c)/2.;
+    }
+
+    return mv;
+}
+
+
 
 
 string fs_a(trj_float_t x, trj_float_t v, trj_float_t t) {
@@ -345,7 +385,6 @@ trj_float_t Block::getT() const {
 }
 
 
-
 trj_float_t Block::getV0() const {
     return v_0;
 }
@@ -354,23 +393,27 @@ trj_float_t Block::getV1() const {
     return v_1;
 }
 
-json Block::dump() const{
+json Block::dump(std::string tag) const {
 
     json m;
 
-    m["_type"]="Block";
-    m["x"]=x;
-    m["d"]=d;
-    m["t"]=t;
-    m["t_a"]=t_a;
-    m["t_c"]=t_c;
-    m["t_d"]=t_d;
-    m["x_a"]=x_a;
-    m["x_c"]=x_c;
-    m["x_d"]=x_d;
-    m["v_0"]=v_0;
-    m["v_c"]=v_c;
-    m["v_1"]=v_1;
+    if(tag.size() > 0){
+        m["_tag"] = tag;
+    }
+
+    m["_type"] = "Block";
+    m["x"] = x;
+    m["d"] = d;
+    m["t"] = t;
+    m["t_a"] = t_a;
+    m["t_c"] = t_c;
+    m["t_d"] = t_d;
+    m["x_a"] = x_a;
+    m["x_c"] = x_c;
+    m["x_d"] = x_d;
+    m["v_0"] = v_0;
+    m["v_c"] = v_c;
+    m["v_1"] = v_1;
 
     return m;
 

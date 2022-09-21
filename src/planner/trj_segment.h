@@ -37,11 +37,13 @@ private:
     u_long n_joints;
 
 public:
+    const vector<Joint> &getJoints() const;
 
-    Segment(uint32_t n, const std::vector<Joint>&  joints, MoveArray moveS );
-    Segment(uint32_t n, const std::vector<Joint>&  joints, const Move& move );
+    Segment(uint32_t n, const std::vector<Joint>&  joints_);
+    Segment(uint32_t n, const std::vector<Joint>&  joints_, MoveArray moves );
+    Segment(uint32_t n, const std::vector<Joint>&  joints_, const Move& move );
 
-    void plan(trj_float_t t_, int v_0_, int v_1_, Segment *prior = nullptr, Segment *next = nullptr);
+    void plan(trj_float_t t_=NAN, int v_0_=0, int v_1_=0, Segment *prior = nullptr, Segment *next = nullptr);
 
     void setBv(int v_0, int v_1);
 
@@ -58,14 +60,17 @@ public:
 
     int getN() const { return n; }
 
-    trj_float_t min_time();
+    trj_float_t minTime();
     trj_float_t time();
+
+    trj_float_t timeErr(); // RMS difference in times of blocks
 
     friend Planner;
 
     friend ostream &operator<<( ostream &output, const Segment &s );
 
-    json dump() const;
+    json dump(std::string tag="", bool dump_joints=false) const;
 
+    static trj_float_t boundaryError(const Segment& prior, const Segment &next);
 
 };

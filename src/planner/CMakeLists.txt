@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.23)
 set (CMAKE_CXX_STANDARD 11)
 
-project(planner VERSION 0.1)
+project(libplanner VERSION 0.1)
 
 add_library( ${PROJECT_NAME}
         trj_move.cpp
@@ -11,7 +11,7 @@ add_library( ${PROJECT_NAME}
         trj_block.cpp
         trj_joint.cpp
         trj_planner.cpp
-)
+        trj_stepper.cpp trj_stepper.h)
 
 configure_file(version.h.in version.h)
 target_compile_definitions(${PROJECT_NAME} PUBLIC "TRJ_ENV_HOST")

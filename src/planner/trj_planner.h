@@ -45,7 +45,9 @@ protected:
     int32_t queue_size=0;
     int32_t queue_time=0;
     int32_t seg_num = 0;
-    MoveArray current_position;
+
+    MoveArray plannerPosition;
+    MoveArray completedPosition;
 
 public:
 
@@ -76,7 +78,7 @@ public:
 
     uint32_t getQueueSize() const{ return  queue_size; }
 
-    MoveArray getPosition(){ return current_position; }
+    MoveArray getPosition(){ return plannerPosition; }
 
     MoveType getCurrentMoveType(){
         if (!isEmpty()) {
@@ -92,14 +94,12 @@ public:
 
     friend ostream &operator<<( ostream &output, const Planner &p );
 
-    json dump() const;
+    json dump(std::string tag="") const;
 
 private:
 
     double boundary_error(Segment &p, Segment &c);
 
-    int plan_at_boundary(Segment &prior, Segment &current);
 
-    
 
 };

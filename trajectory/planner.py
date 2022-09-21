@@ -37,7 +37,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 
-from .gsolver import Joint, ACDBlock, bent, mean_bv
+from .gsolver import Joint, Block, bent, mean_bv
 
 
 def index_clip(n, l):
@@ -55,31 +55,33 @@ class Segment(object):
 
     n: int = None
     t: float = 0
-    blocks: "List[ACDBlock]" = None
+    blocks: "List[Block]" = None
     joints: List[Joint] = None
     prior: "Segment" = None
     move: "List[int]" = None
 
     replans: int = 0
 
-    def __init__(self, n, move: List[int], joints: List[Joint], prior: "Segment" = None):
+    def __init__(self, n, joints: List[Joint], move: List[int] = None, prior: "Segment" = None):
 
         self.n = n
         self.joints = joints
 
-        if isinstance(move[0], ACDBlock):
-            self.blocks = move
-            self.move = [b.x for b in self.blocks]
-        else:
-            self.move = move
-            if prior is not None:
-                self.prior = prior
-                self.blocks = [j.new_block(x=x, v_0=pb.v_1, v_1=0) for j, x, pb in zip(self.joints, move, prior.blocks)]
+        if move is not None:
+            if isinstance(move[0], Block):
+                self.blocks = move
+                self.move = [b.x for b in self.blocks]
             else:
-                self.blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, move)]
+                self.move = move
+                if prior is not None:
+                    self.prior = prior
+                    self.blocks = [j.new_block(x=x, v_0=pb.v_1, v_1=0) for j, x, pb in
+                                   zip(self.joints, move, prior.blocks)]
+                else:
+                    self.blocks = [j.new_block(x=x, v_0=0, v_1=0) for j, x in zip(self.joints, move)]
 
-            for b in self.blocks:
-                b.segment = self
+                for b in self.blocks:
+                    b.segment = self
 
     def plan(self, v_0=None, v_1=None, prior=None, next_=None, t=None, iter=10):
 
@@ -108,8 +110,11 @@ class Segment(object):
             if self.times_e_rms < .001:
                 break
             else:
-                self.limit_bv()
+                for b in self.blocks:
+                    if b.t < mt:
+                        b.limit_bv()
 
+        self.t = self.time
         return self
 
     def zero(self):
@@ -129,32 +134,20 @@ class Segment(object):
         """Calculated maximum of the  minimum time for each block in the segment"""
         return max([b.min_time() for b in self.blocks])
 
-    def limit_bv(self):
-        mt = self.min_time
-
-        for b in self.blocks:
-            if b.t < mt:
-                b.limit_bv()
-
-    @property
-    def dominant(self):
-        x = list(reversed(sorted([(b.min_time(), i) for i, b in enumerate(self.blocks)])))
-        return x[0][1]
-
     @property
     def times_e_rms(self):
         """Compute the RMS difference of the times from the mean time"""
         import numpy as np
 
-        times = [round(b.t, 6) for b in self.blocks]
+        times = [b.t for b in self.blocks] if len(self.blocks) else [0]
 
-        if not times:
-            times = [0]
-
-        s = sum(times)
-        m = s / len(times)
+        m = sum(times) / len(times)
 
         return np.sqrt(np.sum([(t - m) ** 2 for t in times]))
+
+    @property
+    def v_1(self):
+        return [b.v_1 for b in self.blocks]
 
     def __iter__(self):
         return iter(self.blocks)
@@ -214,8 +207,9 @@ class Segment(object):
 class SegmentList(object):
     segments: List[Segment]
     replans: List[int] = None
-    move_positions: List[int] = None
-    step_positions: List[int] = None
+    seg_num: int = 0
+    planner_position: List[int] = None
+    step_position: List[int] = None
 
     def __init__(self, joints: List[Joint]):
 
@@ -228,26 +222,39 @@ class SegmentList(object):
 
         self.segments = deque()
 
-        self.move_positions = [0] * len(joints)
+        self.planner_position = [0] * len(joints)
         self.distance = [0] * len(joints)
-        self.step_positions = np.array([0] * len(joints))
-
+        self.step_position = np.array([0] * len(joints))
+        self.seg_num = 0;
         self.replans = []
 
-    def move(self, x: List[int]):
+        self.queue_length = 0
+        self.queue_time = 0
+
+    def set_position(self, pos):
+        assert len(pos) == len(self.joints)
+
+        self.planner_position = pos
+
+    def move(self, x: List[int], v_max: List[int] = None):
         """Add a new segment, with joints expressing joint distance
         :type x: object
         """
 
         for i, x_ in enumerate(x):
-            self.move_positions[i] += x_
+            self.planner_position[i] += x_
             self.distance[i] += abs(x_)
 
         assert len(x) == len(self.joints)
 
         prior = self.segments[-1] if len(self.segments) > 0 else None
 
-        s = Segment(len(self.segments), x, self.joints, prior)
+        s = Segment(self.seg_num, self.joints, x, prior)
+        self.seg_num += 1;
+
+        if v_max is not None:
+            for b, vm in zip(s.blocks, v_max):
+                b.v_c_max = vm
 
         self.segments.append(s)
 
@@ -258,25 +265,47 @@ class SegmentList(object):
             s.plan(v_0='prior', v_1=0, prior=prior)
             self.plan(len(self.segments) - 1)
 
-        # Linear ( hopefully ) re-plan of the last few segments. This will
-        # finish up straightening bumps and removing discontinuities.
-        if False and len(self.segments) >= 2:
-            n = index_clip(-5, self.segments)  # Replan at most last 4 elements all the way through
-            n = max(1, n)  # Replnning the first one unmoors v_0
-            self.plan(n)
+        self.queue_length +=1
+        self.queue_time = sum(s.t for s in self.segments) # Because times will change with replanning
 
-    def plan(self, i: int = None):
 
-        if i is None:
-            i = len(self.segments) - 1
+    def amove(self, x: List[int]):
+        """Move to an absolute planner position"""
+
+        rmove = [x_ - p_ for x_, p_ in zip(x, self.planner_position)]
+
+        return self.move(rmove)
+
+    def vmove(self, t, v: List[int]):
+        """Move by running at a target velocity for a given time"""
+
+        v_max = max(v)
+        x_max = v_max * t
+
+        move = [x_max * (v_ / v_max) for v_ in v]
+
+        return self.move(move, v_max=v)
+
+    def jmove(self, t, v: List[int]):
+        """Like a vmove, but also removes all but the last two segments"""
+
+        self.segments = deque(list(self.segments)[:2])
+        self.queue_length = len(self.segments)
+
+        return self.vmove(t, v)
+
+    def plan(self, seg_idx: int = None):
+
+        if seg_idx is None:
+            seg_idx = len(self.segments) - 1
 
         for p_idx in range(15):
 
-            current = self.segments[i]
-            prior = self.segments[i - 1] if i >= 1 else None
-            pre_prior = self.segments[i - 2] if i >= 2 else None
+            current = self.segments[seg_idx]
+            prior = self.segments[seg_idx - 1]
+            pre_prior = self.segments[seg_idx - 2] if seg_idx >= 2 else None
 
-            assert prior == current.prior, (i, prior.n, current.prior.n)
+            assert prior == current.prior, (seg_idx, prior.n, current.prior.n)
 
             prior.plan(v_1='next', prior=pre_prior, next_=current)  # Plan a first
             current.plan(v_0='prior', prior=prior)  # Plan b with maybe changed velocities from a
@@ -291,25 +320,25 @@ class SegmentList(object):
                     return 0;
 
             bends = 0
-            for p, n in zip(prior.blocks, current.blocks):
-                if True and bent(p, n):
-                    diff = abs(p.v_1 - mean_bv(p, n))
-                    if diff < v_limit(p_idx, p.joint.v_max):
-                        p.v_1 = n.v_0 = mean_bv(p, n)
+            for pb, cb in zip(prior.blocks, current.blocks):
+                if bent(pb, cb):
+                    diff = abs(pb.v_1 - mean_bv(pb, cb))
+                    if diff < v_limit(p_idx, pb.joint.v_max):
+                        pb.v_1 = cb.v_0 = mean_bv(pb, cb)
                         bends += 1
 
             if bends or (pre_prior is not None and self.boundary_error(pre_prior, prior)):
-                i += -1  # Run it again one segment earlier
+                seg_idx += -1  # Run it again one segment earlier
             elif self.boundary_error(prior, current):
                 # This means that the current could not handle the commanded v_0,
                 # so prior will have to yield.
-                i += 0  # Re-run planning on this boundary
+                seg_idx += 0  # Re-run planning on this boundary
             else:
-                i += 1  # Advance to the next segment
+                seg_idx += 1  # Advance to the next segment
 
-            i = max(1, i)
+            seg_idx = max(1, seg_idx)
 
-            if i >= len(self.segments):
+            if seg_idx >= len(self.segments):
                 break
 
         self.replans.append(p_idx)
@@ -373,6 +402,17 @@ class SegmentList(object):
 
         return df
 
+    @property
+    def front(self):
+        """Reference to the front of the segments"""
+        return self.segments[0]
+
+    def pop(self):
+        """Remove the front of the segments"""
+        s = self.segments.popleft()
+        self.queue_time -= s.t
+        self.queue_length -= 1
+
     def __getitem__(self, item):
         """Return a joint segment by the id"""
         try:
@@ -434,7 +474,7 @@ class SegmentList(object):
             else:
                 while not steppers[0].done and not all([stp.done for stp in steppers]):
                     steps = [stp.next() for stp in steppers]
-                    self.step_positions += np.array(steps)
+                    self.step_position += np.array(steps)
                     yield [t] + steps
                     t += dt
 
@@ -450,3 +490,5 @@ class SegmentList(object):
             df = df[df.axis == axis]
 
         plot_trajectory(df, ax=ax)
+
+

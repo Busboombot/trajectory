@@ -57,9 +57,8 @@ private:
 
 
 public:
-    void init();
 
-    void plan(trj_float_t t_, int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr);
+    void plan(trj_float_t t_=NAN, int v_0_=BV_NAN, int v_1_=BV_NAN, Block *prior = nullptr, Block *next = nullptr);
 
     trj_float_t area();
 
@@ -73,14 +72,19 @@ public:
 
     void setBv(int v_0_, int v_1_, Block *prior = nullptr, Block *next = nullptr) ; // Clip the boundary values based on the distance
 
+    void limitBv();
 
     trj_float_t getV0() const;
 
     trj_float_t getV1() const;
 
-    json dump() const;
+    json dump(std::string tag="") const;
 
     friend Planner;
+
+    static bool bent(Block& prior, Block &current);
+    static trj_float_t meanBv(Block& prior, Block &next);
+
 
 private:
 

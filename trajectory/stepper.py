@@ -26,18 +26,17 @@ class Stepper(object):
     t_f: int = 0
     delay: float = 0
     delay_counter: float = 0
-    steps_left: int = 0
     periods_left: int = 0
 
     done: bool = False
-    blocks: "List[tuple]" = []
+
 
     def __init__(self, period=DEFAULT_PERIOD, details=False):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
         self.period = period
         self.delay_inc = period / TIMEBASE
-        self.delay_counter=0
+        self.delay_counter = 0
 
         self.t = 0
         self.phase_t = 0
@@ -51,7 +50,12 @@ class Stepper(object):
         self.done = False
 
     def load_phases(self, phases):
-
+        """ Phases is a list of tuples, (x, vi, vf)
+        :param phases:
+        :type phases:
+        :return:
+        :rtype:
+        """
         self.phases = phases
         self.phase = 0
         self.done = False
@@ -68,9 +72,8 @@ class Stepper(object):
         self.delay_inc = self.period / TIMEBASE
         self.step_inc = 1
 
-        self.t_f = abs((2. * self.x) / (vi + vf)) if (vi+vf) != 0 else 0
-        #self.a = (vf ** 2 - vi ** 2) / (2 * x) if x != 0 else 0
-        self.a = (self.vf-self.vi)/ self.t_f if self.t_f != 0 else 0
+        self.t_f = abs((2. * self.x) / (vi + vf)) if (vi + vf) != 0 else 0
+        self.a = (self.vf - self.vi) / self.t_f if self.t_f != 0 else 0
 
         self.steps_left = int(round(self.x))
         self.steps_stepped = 0
@@ -87,18 +90,17 @@ class Stepper(object):
 
         self.periods_left = int(round(self.t_f / self.delay_inc))
 
-        self.done=False
-
+        self.done = False
 
     def next(self):
 
         if self.steps_left <= 0 or self.periods_left <= 0:
-           if self.done or self.phase == 3:
-               self.done = True
-               return 0
-           else:
-               self.init_next_phase()
-               self.phase += 1
+            if self.done or self.phase == 3:
+                self.done = True
+                return 0
+            else:
+                self.init_next_phase()
+                self.phase += 1
 
         if self.delay_counter > self.delay:
             self.delay_counter -= self.delay
@@ -112,7 +114,7 @@ class Stepper(object):
 
         self.v = self.vi + self.a * self.phase_t
 
-        self.delay = abs( 1 / self.v) if self.v else 1
+        self.delay = abs(1 / self.v) if self.v else 1
         self.delay_counter += self.delay_inc
 
         self.t += self.delay_inc
@@ -131,12 +133,12 @@ class Stepper(object):
         step = self.next()
         d = dict(s=step, dr=self.direction, t=self.t, pt=self.phase_t, tf=self.t_f, v=self.v,
                  a=self.a,
-                 #vi=self.vi, vf=self.vf,
+                 # vi=self.vi, vf=self.vf,
                  sl=self.steps_left, pl=self.periods_left,
                  sg=None, ph=self.phase,
                  dl=self.delay, dc=self.delay_counter,
-                  xc=self.calc_x, xe=self.x_err,
-                 #isdone=self.done
+                 xc=self.calc_x, xe=self.x_err,
+                 # isdone=self.done
                  )
 
         return d
@@ -148,3 +150,76 @@ class Stepper(object):
                     yield self.next_details()
                 else:
                     yield self.next()
+
+
+class SegmentStepper:
+
+    def __init__(self, sl: "SegmentList", step_if: list[object] = None, details: bool = False):
+        from .stepper import DEFAULT_PERIOD, TIMEBASE, Stepper
+
+        self.sl = sl
+        self.step_if = step_if  # Step interface
+        self.details = details
+        self.t = 0
+
+        self.steppers = [Stepper(details=self.details) for _ in self.sl.joints]
+
+        self.step_position = [0] * len(self.sl.joints)
+
+        period = DEFAULT_PERIOD
+        self.dt = period / TIMEBASE
+
+        self.seg = None
+
+    def step(self):
+        import numpy as np
+
+        if len(self.sl.segments) == 0:
+            return None
+
+        # Load the next segment
+        if self.seg is None:
+
+            self.seg = self.sl.front
+
+            for b, stp in zip(self.seg.blocks, self.steppers):
+                stp.load_phases(b.stepper_blocks())
+
+        # Get the next set of steps
+        if self.details:
+            r = self.steppers[0].next_details()
+            r['sg'] = self.seg.n
+            r['qt'] = self.sl.queue_time
+            r['ql'] = self.sl.queue_length
+
+            done = self.steppers[0].done
+
+        else:
+            steps = [stp.next() for stp in self.steppers]
+            self.step_position += np.array(steps)
+            r = [self.t] + steps
+            self.t += self.dt
+
+            done = self.steppers[0].done and all([stp.done for stp in self.steppers])
+
+
+        # When done, invalidate the segment and remove it.
+        if done:
+            self.sl.pop()
+            self.seg = None
+
+        return r
+
+    @property
+    def done(self):
+        return [stp.done for stp in self.steppers]
+
+    def __next__(self):
+        s =  self.step()
+        if s is None:
+            raise StopIteration
+        else:
+            return s
+
+    def __iter__(self):
+        return self

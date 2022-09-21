@@ -1,13 +1,12 @@
 
 cmake_minimum_required(VERSION 3.23)
 
-project(trj_planner LANGUAGES CXX)
+project(cli LANGUAGES CXX)
 set (CMAKE_CXX_STANDARD 11)
 
-set( SOURCES_TESTS
-        cli.cpp)
 
-add_executable(trj_planner ${SOURCES_TESTS} )
+add_executable(planner planner.cpp )
+target_link_libraries(planner PRIVATE  libplanner)
 
-target_link_libraries(trj_planner PRIVATE  planner)
-
+add_executable(stepper stepper.cpp )
+target_link_libraries(stepper PRIVATE  libplanner)

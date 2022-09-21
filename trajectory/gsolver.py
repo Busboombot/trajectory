@@ -47,10 +47,18 @@ def accel_acd(v_0, v_c, v_1, a):
     """ Same result as running accel_xt, for v_0->v_c and v_c->v_1,
     and adding the x and t values.
     """
-    t_ad = (abs(v_c - v_0) + abs(v_c - v_1)) / a
+    #t_ad = (abs(v_c - v_0) + abs(v_c - v_1)) / a
     x_ad = abs((v_0 ** 2 - v_c ** 2) / (2 * a)) + abs((v_1 ** 2 - v_c ** 2) / (2 * a))
+    #return x_ad, t_ad
 
-    return x_ad, t_ad
+    x_a, t_a = accel_xt(v_0, v_c, a)
+    x_d, t_d = accel_xt(v_c, v_1, a)
+
+    assert round((x_a+x_d)-(x_ad),2) == 0, (x_a+x_d, x_ad)
+
+    return x_a+x_d, t_a+t_d
+
+
 
 
 def sign(x):
@@ -106,11 +114,11 @@ class Joint:
         v_0 = v_0 if v_0 is not None else self.v_max
         v_1 = v_1 if v_1 is not None else self.v_max
 
-        return ACDBlock(x=x, v_0=v_0, v_1=v_1, joint=self)
+        return Block(x=x, v_0=v_0, v_1=v_1, joint=self)
 
 
 @dataclass
-class ACDBlock:
+class Block:
     x: float = 0
     t: float = 0
 
@@ -127,6 +135,8 @@ class ACDBlock:
     v_1: float = 0
     d: int = 0  # direction, -1 or 1
 
+    v_c_max = None
+
     joint: Joint = None
     segment: 'Segment' = None
 
@@ -135,18 +145,16 @@ class ACDBlock:
     memo: object = None
     step_period: int = DEFAULT_PERIOD
 
-    _param_names = ['x', 't', 'dir', 'v_0_max', 'v_0', 'x_a', 't_a', 'x_c', 't_c', 'v_c_max', 'v_c', 'x_d', 't_d',
-                    'v_1',
-                    'v_1_max']
-
     @property
     def id(self):
         return f"{self.segment.n}/{self.joint.n}"
 
     def __post_init__(self):
 
-        self.d = sign(self.x)
+        if self.d == 0: # ONly set if it hasn't be set in ctor
+            self.d = sign(self.x)
         self.x = abs(self.x)
+        self.v_c_max = self.joint.v_max
         self.reductions = []
         self.memo = []
         self.errors = []
@@ -160,7 +168,7 @@ class ACDBlock:
         if self.x == 0:
             v_c = 0
 
-        elif self.x < 2 * self.joint.small_x:
+        elif self.x < 2. * self.joint.small_x:
             # The limit is the same one used for set_bv.
             # the equation here is the sympy solution to:
             # t_a = (v_c - v_0) / a
@@ -170,8 +178,10 @@ class ACDBlock:
             # x_c = x - (x_a + x_d)
             # solve(x_c, v_c)[1]
 
-            v_c = (sqrt(4 * self.joint.a_max * self.x + 2 * self.v_0 ** 2 + 2 * self.v_1 ** 2) / 2)
-
+            v_c = (sqrt(4. * self.joint.a_max * self.x +
+                        2. * self.v_0 ** 2 +
+                        2. * self.v_1 ** 2
+                        ) / 2.)
         else:
             # If there is more area than the triangular profile for these boundary
             # velocities, the v_c must be v_max. In this case, it must also be true that:
@@ -179,14 +189,19 @@ class ACDBlock:
             #    assert self.x > x_ad
             v_c = self.joint.v_max
 
+
         x_ad, t_ad = accel_acd(self.v_0, v_c, self.v_1, self.joint.a_max)
+
         t_c = (self.x - x_ad) / v_c if v_c != 0 else 0
 
         t_c = max(t_c, t_ad / 2)  # Enforce 1/3 rule, each a,c,d is 1/3 of total time
 
         return t_c + t_ad
 
-    def plan(self, t, v_0=None, v_1=None, prior=None, next_=None, iter=None):
+    def plan(self, t=None, v_0=None, v_1=None, prior=None, next_=None, iter=None):
+
+        if t == None:
+            t = self.min_time()
 
         if self.segment is not None:
             assert not ((prior is None) ^ (self.segment.prior is None))
@@ -212,11 +227,13 @@ class ACDBlock:
             t_c = max(self.t - t_ad, 0)
             x_c = max(v_c, 0) * t_c
 
-            return self.x - (x_ad + x_c)
+            err = self.x - (x_ad + x_c)
+
+            return err
 
         v_c = binary_search(err, 0, self.x / self.t, self.joint.v_max)
 
-        self.v_c = min(v_c, self.joint.v_max)
+        self.v_c = min(v_c, self.v_c_max)
 
         self.x_a, self.t_a = accel_xt(self.v_0, self.v_c, self.joint.a_max)
         self.x_d, self.t_d = accel_xt(self.v_c, self.v_1, self.joint.a_max)
@@ -226,7 +243,7 @@ class ACDBlock:
         self.t_a = abs((self.v_c - self.v_0) / self.joint.a_max)
         self.t_d = abs((self.v_c - self.v_1) / self.joint.a_max)
 
-        if round(self.x_c) == 0:  # get rid of small negatives
+        if round(self.x_c) == 0 and self.x_c < 0:  # get rid of small negatives
             self.x_c = 0
 
         self.t_c = abs(self.x_c / self.v_c) if self.v_c != 0 else 0
@@ -431,7 +448,6 @@ class ACDBlock:
             (ri(self.d * self.x_d), ri(self.d * self.v_c), ri(self.d * self.v_1))
         )
 
-
     def step(self, period=DEFAULT_PERIOD, details=False):
         stp = Stepper(period, details=details)
 
@@ -447,18 +463,24 @@ class ACDBlock:
 
             t += period
 
-
     def str(self):
         from colors import color, bold
 
-        v0 = color(f"{int(self.v_0):<5d}", fg='blue')
-        xa = color(bold(f"{int(self.d * self.x_a):>6d}"), fg='green')
-        c = color(bold(f"{int(round(self.d * self.x_c)):>6d}"), fg='green')
-        vc = color(f"{int(self.v_c):<6d}", fg='blue')
-        xd = color(bold(f"{int(self.d * self.x_d):<6d}"), fg='green')
-        v1 = color(f"{int(self.v_1):>5d}", fg='blue')
+        ri = lambda v: int(round(v))
 
-        return f"[{v0} {xa}↗{c + '@' + vc}↘{xd} {v1}]"
+        ta = color(f"{ri(self.t_a*1000):<5d}", fg='yellow')
+        tc = color(f"{ri(self.t_c * 1000):<5d}", fg='yellow')
+        td = color(f"{ri(self.t_d * 1000):<5d}", fg='yellow')
+
+
+        v0 = color(f"{ri(self.v_0):<5d}", fg='blue')
+        xa = color(bold(f"{ri(self.d * self.x_a):>6d}"), fg='green')
+        xc = color(bold(f"{ri(self.d * self.x_c):>6d}"), fg='green')
+        vc = color(f"{ri(self.v_c):<6d}", fg='blue')
+        xd = color(bold(f"{ri(self.d * self.x_d):<6d}"), fg='green')
+        v1 = color(f"{ri(self.v_1):>5d}", fg='blue')
+
+        return f"[{v0} {xa} {ta}↗{vc} {xc} {tc}↘{xd} {td} {v1}]"
 
 
     def _repr_pretty_(self, p, cycle):

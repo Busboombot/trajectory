@@ -1,11 +1,13 @@
 #include <iostream>
 #include <vector>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "trj_segment.h"
 #include "trj_joint.h"
 #include "trj_planner.h"
+
+
+#include <catch2/catch_test_macros.hpp>
+
 
 vector<Move> get2Moves(){
     return std::vector<Move>{
@@ -21,6 +23,7 @@ vector<Joint> get2Joints(){
     };
 }
 
+
 TEST_CASE("Basic Planner Test", "[planner]"){
 
     vector<Joint> joints = get2Joints();
@@ -31,6 +34,19 @@ TEST_CASE("Basic Planner Test", "[planner]"){
     p.move({1000,1000});
     p.move({1000,1000});
 
+
+    cout <<" ============ " << endl;
+    cout << p << endl;
+}
+
+TEST_CASE("Large Small Planner Test", "[planner]"){
+
+    vector<Joint> joints = get2Joints();
+
+    Planner p(joints);
+
+    p.move({1000,1});
+    p.move({1,1000});
 
     cout <<" ============ " << endl;
     cout << p << endl;

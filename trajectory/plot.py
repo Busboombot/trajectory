@@ -72,7 +72,7 @@ def plot_trajectory(df, ax=None):
     return ax
 
 def plot_params_df(*args):
-    from trajectory.gsolver import ACDBlock
+    from trajectory.gsolver import Block
 
     import numpy as np
 
@@ -95,7 +95,7 @@ def plot_params_df(*args):
 
     for i,a in enumerate(args):
 
-        if isinstance(a, ACDBlock):
+        if isinstance(a, Block):
             # Individual Params
             seg_0.append(a)
         else: # Assume tuple of params -- a segment

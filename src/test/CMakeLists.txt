@@ -9,12 +9,13 @@ set( SOURCES_TESTS
         test.cpp
         test_basic.cpp
         test_block.cpp
+        test_segment.cpp
         test_planner.cpp
 )
 
 add_executable(test_planner ${SOURCES_TESTS} )
 
-target_link_libraries(test_planner PRIVATE Catch2::Catch2WithMain planner)
+target_link_libraries(test_planner PRIVATE Catch2::Catch2WithMain libplanner)
 
 catch_discover_tests(test_planner)
 
