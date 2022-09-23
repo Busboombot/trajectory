@@ -4,7 +4,7 @@
 
 StepperState::StepperState(int period, int timebase) : period(period), timebase(timebase) {
 
-    delay_inc = (float)period / (float)timebase;
+    delay_inc = (double)period / (double)timebase;
 }
 
 StepperState::StepperState() : StepperState(4,1000000) { }
@@ -34,12 +34,12 @@ void StepperState::next_phase() {
     direction = sign(phase->x);
     steps_left = abs(phase->x);
 
-    t_f = (phase->vi + phase->vf) != 0 ? fabsf((2.f * (float)steps_left) / (phase->vi + phase->vf)) : 0;
+    t_f = (phase->vi + phase->vf) != 0 ? fabs((2.f * (double)steps_left) / (phase->vi + phase->vf)) : 0;
     a =  t_f != 0 ? (phase->vf - phase->vi) / t_f : 0;
 
     phase_t = 0;
 
-    float v = a * delay_inc + phase->vi;
+    double v = a * delay_inc + phase->vi;
     delay = v!=0 ? fabs(1/v) : 0;
     delay_counter += delay_inc;
 
@@ -72,7 +72,7 @@ int StepperState::next() {
 
     periods_left -= 1;
 
-    float v = phase->vi + a * phase_t;
+    double v = phase->vi + a * phase_t;
 
     delay = v!=0 ? abs(1 / v) : 1;
     delay_counter += delay_inc;
@@ -80,11 +80,11 @@ int StepperState::next() {
     t += delay_inc;
     phase_t += delay_inc;
 
-    float calc_x = fabsf((a * (float)pow(phase_t,2)) / 2.f + phase->vi * phase_t);
-    float x_err = (float)steps_stepped - calc_x;
+    double calc_x = fabs((a * (double)pow(phase_t,2)) / 2.f + phase->vi * phase_t);
+    double x_err = (double)steps_stepped - calc_x;
 
-    if (abs(x_err) > .5 && phase_n == 1) {
-        float s = (x_err / abs(x_err)); // Just want the sign
+    if (false && abs(x_err) > .5 && phase_n == 1) {
+        double s = (x_err / abs(x_err)); // Just want the sign
         delay_counter += -s * delay_inc * .1f; //  Only Make the adjustment slowly, 10% at a step
     }
 

@@ -162,6 +162,11 @@ class Segment(object):
     def _repr_pretty_(self, p, cycle):
         p.text(str(self) if not cycle else '...')
 
+    @property
+    def stepper_blocks(self):
+
+        return [b.stepper_blocks() for b in self.blocks]
+
     def stepper(self, t0=0, period=None, timebase=None, details=False):
         """Run steppers for all of the blocks in this segment"""
         from .stepper import DEFAULT_PERIOD, TIMEBASE

@@ -437,10 +437,14 @@ class Block:
         from .plot import plot_trajectory
         plot_trajectory(self.dataframe, ax=ax)
 
-
     def stepper_blocks(self):
+
         def ri(v):
             return int(round(v))
+
+        # t is the segment time, which can differe a bit from the times of the
+        # individual blocks. For stepping, we adjust these times, which
+        # adjusts accelerations, so all stepped block have the same time
 
         return (
             (ri(self.d * self.x_a), ri(self.d * self.v_0), ri(self.d * self.v_c)),
@@ -453,7 +457,7 @@ class Block:
 
         t = 0
 
-        stp.load_phases(self.stepper_blocks())
+        stp.load_phases(self.stepper_blocks(self.t))
 
         while not stp.done:
             if details:

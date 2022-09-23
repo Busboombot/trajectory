@@ -7,8 +7,8 @@ using namespace std;
 
 struct StepperPhase{
     int x;
-    float vi;
-    float vf;
+    double vi;
+    double vf;
 };
 
 class StepperState {
@@ -20,14 +20,14 @@ private:
     int direction = 0;
 
 
-    float t= 0;
-    float t_f = 0;
-    float phase_t = 0;
-    float delay = 0;
-    float delay_inc = 0;
-    float delay_counter= 0;
+    double t= 0;
+    double t_f = 0;
+    double phase_t = 0;
+    double delay = 0;
+    double delay_inc = 0;
+    double delay_counter= 0;
 
-    float a;
+    double a;
 
     int period = 0;
     int timebase = 0;
