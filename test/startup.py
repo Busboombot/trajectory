@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 from collections import Counter
 from IPython.display import display, HTML, Markdown
 import pandas as pd
+import numpy as np
 
 from math import sqrt
 from random import randint, random, choices

@@ -10,6 +10,7 @@
 #include "trj_block.h"
 #include "trj_joint.h"
 #include "trj_segment.h"
+#include "trj_stepper.h"
 
 using json = nlohmann::json;
 
@@ -320,9 +321,19 @@ void Block::limitBv() {
     }
 }
 
+array<StepperPhase,3> Block::getStepperPhases() const{
+
+    auto dd = double(d);
+    return array<StepperPhase,3>{
+            StepperPhase{int(d)*int(round(x_a)),dd*v_0,dd*v_c},
+            StepperPhase{int(d)*int(round(x_c)),dd*v_c,dd*v_c},
+            StepperPhase{int(d)*int(round(x_d)),dd*v_c,dd*v_1} };
+
+}
+
 bool Block::bent(Block& prior, Block &current) {
-    int cd = current.d;
-    int pd = prior.d;
+    int cd = (int)current.d;
+    int pd = (int)prior.d;
 
     int s1 = sign(pd * prior.v_c - pd * prior.v_1);
     int s2 = sign(cd * current.v_0 - cd * current.v_c);

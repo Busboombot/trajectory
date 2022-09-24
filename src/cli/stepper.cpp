@@ -113,14 +113,11 @@ int main() {
         auto dist = vector<int>(n_axes);
 
         do {
-            //cout << seg_n << " " <<  step_n << " ";
             int sn = 0;
             for( auto &ss: steppers){
                 doneCount += ss.isDone();
-                //cout << ss.next() << " ";
                 dist[sn++] += ss.next();
             }
-            //cout << endl;
             step_n += 1;
         } while(doneCount == 0);
 
@@ -130,7 +127,6 @@ int main() {
 
         seg_n++;
     }
-
 
 
 

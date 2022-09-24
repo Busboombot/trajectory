@@ -16,6 +16,7 @@ using namespace std;
 using json = nlohmann::json;
 
 class Planner;
+class SegmentStepper;
 
 /* Segment: One move for all joints, with Accel, Cruise and Decel phases. 
  * 
@@ -66,6 +67,7 @@ public:
     trj_float_t timeErr(); // RMS difference in times of blocks
 
     friend Planner;
+    friend SegmentStepper;
 
     friend ostream &operator<<( ostream &output, const Segment &s );
 

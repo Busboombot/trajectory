@@ -1,6 +1,7 @@
 #include <tuple>
 #include <utility>
 #include "trj_stepper.h"
+#include "trj_planner.h"
 
 StepperState::StepperState(int period, int timebase) : period(period), timebase(timebase) {
 
@@ -20,15 +21,12 @@ void StepperState::loadPhases(vector<StepperPhase> phases_) {
 
 void StepperState::loadPhases(array<StepperPhase,3> phases_) {
 
-    phases = vector<StepperPhase>(phases_.begin(), phases_.end());
-    phases_left = phases.size();
-    phase_n = 0;
-    done = false;
+    loadPhases(vector<StepperPhase>(phases_.begin(), phases_.end()));
+
 }
 
 
 void StepperState::next_phase() {
-
     phase  = &phases[phase_n];
 
     direction = sign(phase->x);
@@ -48,10 +46,13 @@ void StepperState::next_phase() {
 
     phase_n += 1;
     phases_left -= 1;
+
+    if (stepper != nullptr)
+        stepper->setDirection(direction);
 }
 
-
 int StepperState::next() {
+
 
     if (steps_left <= 0 || periods_left <= 0){
         if (done or phases_left==0){
@@ -63,6 +64,7 @@ int StepperState::next() {
     }
 
     int r = 0;
+
     if (delay_counter > delay) {
         delay_counter -= delay;
         steps_left -= 1;
@@ -88,5 +90,58 @@ int StepperState::next() {
         delay_counter += -s * delay_inc * .1f; //  Only Make the adjustment slowly, 10% at a step
     }
 
+    if (stepper != nullptr)
+        stepper->step(t, r);
+
     return r;
 }
+
+
+SegmentStepper::SegmentStepper(Planner &planner) : planner(planner){
+
+    stepperStates.erase (stepperStates.begin(),stepperStates.end());
+
+    for (const Joint &j: planner.getJoints()) {
+        stepperStates.emplace_back();
+    }
+
+}
+
+int SegmentStepper::next(){
+
+
+    if (activeAxes == 0 && !planner.segments.empty()){
+
+        Segment &seg = planner.segments.front();
+
+        auto ssi = stepperStates.begin();
+        for(const Block &b: seg.blocks){
+            (*ssi++).loadPhases(b.getStepperPhases());
+        }
+    }
+
+    for(StepperState &s: stepperStates){
+        s.next();
+    }
+
+    activeAxes = stepperStates.size();
+    for(const StepperState &s: stepperStates) activeAxes -= (int)s.isDone();
+
+    if (activeAxes == 0 && !planner.segments.empty() ){
+        planner.segments.pop_front();
+    }
+
+    return (int)activeAxes;
+
+}
+
+void SegmentStepper::setSteppers(const vector<StepInterface *> &steppers) {
+    SegmentStepper::steppers = steppers;
+
+    auto ssi = stepperStates.begin();
+    for(StepInterface* si : steppers){
+        (*ssi++).setStepper(si);
+    }
+
+}
+

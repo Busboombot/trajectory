@@ -1,9 +1,18 @@
 #pragma once
+#include <utility>
 #include <vector>
 #include <array>
-#include <trj_util.h>
+#include "trj_util.h"
+#include "trj_planner.h"
 
 using namespace std;
+
+class StepInterface {
+public:
+    StepInterface()= default;
+    virtual int step(double t, int step) = 0;
+    virtual void setDirection(int direction) = 0;
+};
 
 struct StepperPhase{
     int x;
@@ -13,7 +22,6 @@ struct StepperPhase{
 
 class StepperState {
 private:
-    // """A step segment for simulating the step interval algorithm. """
 
     int steps_left = 0;
     int steps_stepped = 0;
@@ -40,23 +48,42 @@ private:
     vector<StepperPhase> phases;
     const StepperPhase *phase; // Current pahse.
 
+    StepInterface *stepper=nullptr;
+
 public:
     StepperState(int period, int timebase);
     StepperState();
 
     void loadPhases(vector<StepperPhase> phases);
     void loadPhases(array<StepperPhase,3> phases);
+    void setStepper(StepInterface* stepper_){ stepper = stepper_;}
     void next_phase();
-
     int next();
 
-    inline const int isDone() { return done ? 1 : 0; };
+    inline int isDone() const { return done ? 1 : 0; };
 
 };
 
 
 class SegmentStepper {
 
+public:
+
+    explicit SegmentStepper(Planner &planner);
+    int next();
+
+
+private:
+
+    Planner & planner;
+    vector<StepperState> stepperStates;
+    vector<StepInterface*> steppers;
+public:
+    void setSteppers(const vector<StepInterface *> &steppers);
+
+private:
+
+    unsigned long activeAxes = 0;
 
 };
 

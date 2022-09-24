@@ -2,18 +2,23 @@
 #include <tuple>
 #include <stdexcept>
 #include <iostream>
+#include <map>
+#include <array>
+
+
 #include "trj_util.h"
 #include "trj_types.h"
-#include <map>
-#include "json.hpp"
 
 #include "json.hpp"
+
+
 
 using json = nlohmann::json;
 
 using namespace std;
 using std::ostream;
 
+struct StepperPhase;
 class Segment;
 class Joint;
 class Planner;
@@ -75,16 +80,16 @@ public:
     void limitBv();
 
     trj_float_t getV0() const;
-
     trj_float_t getV1() const;
 
     json dump(std::string tag="") const;
 
-    friend Planner;
+    array<StepperPhase,3> getStepperPhases() const;
 
     static bool bent(Block& prior, Block &current);
     static trj_float_t meanBv(Block& prior, Block &next);
 
+    friend Planner;
 
 private:
 

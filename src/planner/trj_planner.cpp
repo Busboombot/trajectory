@@ -14,10 +14,19 @@ using namespace std;
 
 int here_count = 0; // for the HERE macro, in trj_util
 
+Planner::Planner() {
 
+}
 Planner::Planner(std::vector<Joint> joints_) {
 
-    joints.resize(joints_.size());
+    setJoints(joints_);
+
+}
+
+void Planner::setJoints(std::vector<Joint> joints_){
+
+
+    joints.erase (joints.begin(),joints.end());
 
     plannerPosition.resize(joints.size());
     plannerPosition = {0};
@@ -25,11 +34,9 @@ Planner::Planner(std::vector<Joint> joints_) {
     int i = 0;
     for (Joint &j: joints_) {
         j.n = i++;
-        setJoint(j);
+        joints.push_back(j);
     }
-
 }
-
 
 void Planner::move(const Move &move) {
     this->move(move.x);
@@ -148,16 +155,6 @@ double Planner::boundary_error(Segment &p, Segment &c){
 }
 
 
-void Planner::setNJoints(int n_joints) {
-    joints.resize(n_joints);
-}
-
-
-void Planner::setJoint(Joint &joint) {
-    if ((int) joint.n < (int) joints.size()) {
-        joints[joint.n] = joint;
-    }
-}
 
 
 bool Planner::isEmpty() { return segments.size() == 0; }
@@ -184,8 +181,7 @@ ostream &operator<<(ostream &output, const Planner &p) {
     return output;
 }
 
-
-json Planner::dump(std::string tag) const{
+json Planner::dump(const std::string& tag) const{
 
     json j;
 
@@ -205,6 +201,7 @@ json Planner::dump(std::string tag) const{
 
     return j;
 }
+
 
 
 

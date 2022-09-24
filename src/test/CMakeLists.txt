@@ -11,6 +11,8 @@ set( SOURCES_TESTS
         test_block.cpp
         test_segment.cpp
         test_planner.cpp
+        test_stepper.cpp
+
 )
 
 add_executable(test_planner ${SOURCES_TESTS} )

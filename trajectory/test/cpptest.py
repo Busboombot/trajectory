@@ -98,10 +98,11 @@ class TestPlanner:
             del jd['_type']
             joints.append(Joint(**jd))
 
-        for bd in j['blocks']:
+        for joint, bd in zip(joints, j['blocks']):
             bd = dict(**bd)
             del bd['_type']
-            blocks.append(Block(**bd))
+
+            blocks.append(Block(**bd, joint=joint))
 
         s = Segment(0, joints, blocks)
         s.move =j['move']
@@ -114,7 +115,7 @@ class CPPPlanner:
 
     def __init__(self, test_dir):
         self.test_dir = Path(test_dir)
-        self.exe_path = self.test_dir.joinpath('trj_planner')
+        self.exe_path = self.test_dir.joinpath('planner')
 
     def make(self):
 
@@ -143,7 +144,10 @@ class CPPPlanner:
 
         inpt = self.make_input(joints, moves)
 
-        proc = subprocess.Popen(str(self.exe_path), text=True, encoding='utf-8',
+        with open(self.test_dir.joinpath('planner_input.txt'), 'w') as f:
+            f.write(inpt)
+
+        proc = subprocess.Popen([str(self.exe_path),'-pj'], text=True, encoding='utf-8',
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         try:
             outs, errs = proc.communicate(input=inpt, timeout=2)
@@ -154,7 +158,9 @@ class CPPPlanner:
 
         for line in outs.splitlines():
             try:
+
                 return json.loads(line)
+
             except json.JSONDecodeError as e:
                 print("| ",line)
 
@@ -167,14 +173,15 @@ class CPPPlanner:
         joints = [Joint(n=i, v_max=j['v_max'],a_max=j['a_max']) for i,j in enumerate(d['joints'])]
         for seg_n, sd in  enumerate(d['segments']):
             blocks = []
-            for bd in sd['blocks']:
+            for joint, bd in zip(joints, sd['blocks']):
                 del bd['_type']
-                b = Block(**bd)
+                b = Block(**bd, joint=joint)
                 blocks.append(b)
             sl.segments.append(Segment(seg_n, joints, blocks))
 
         if "_time" in d:
-            print("CPP Time: ", round(d["_time"]/1000), "μs")
+            print("CPP Time: ", round(d["_time"]), "μs",
+                  round(d["_time"]/(len(sl.segments)*len(joints))), "μs per block")
 
         return sl
 
@@ -186,7 +193,8 @@ class CPPPlanner:
         for move in moves:
             sl_p.move(move)
         t_diff = time.time()-start
-        print("Pyp Time: ", round(t_diff*1_000_000) , "μs")
+        print("Pyp Time: ", round(t_diff*1_000_000) , "μs",
+              round(t_diff*1_000_000/(len(sl_p.segments)*len(joints))), "μs per block")
 
         self.make()
         sl_c = self.planner(joints, moves)
@@ -232,7 +240,7 @@ class TestStepper:
 
         inpt = self.make_input(sl)
 
-        with open(self.test_dir.joinpath('input.txt'), 'w') as f:
+        with open(self.test_dir.joinpath('stepper_input.txt'), 'w') as f:
             f.write(inpt)
 
         proc = subprocess.Popen(str(self.exe_path), text=True, encoding='utf-8',

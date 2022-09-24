@@ -16,6 +16,7 @@
 #include "trj_segment.h"
 #include "trj_joint.h"
 #include "trj_types.h"
+#include "trj_stepper.h"
 #include "json.hpp"
 
 
@@ -51,7 +52,10 @@ protected:
 
 public:
 
+    explicit Planner();
     explicit Planner(std::vector<Joint> joints);
+
+    void setJoints(std::vector<Joint> joints);
 
     // Add a move, processing it into a Segment
     void move(const Move& move);
@@ -63,16 +67,13 @@ public:
 
 
 
+
 public:
 
     // Fpr passing in to set_bv for boundaries you don't want to change.
     VelocityVector V_NAN = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN};
 
-    // Reset the joints
-    void setNJoints(int n_joints);
-    void setJoint(Joint &joint);
-
-    unsigned long getSegmentsSize(){  return segments.size();}
+    unsigned long getNSegments(){  return segments.size();}
 
     uint32_t getQueueTime() const{ return queue_time;  }
 
@@ -92,9 +93,11 @@ public:
 
     const Joint &getJoint(int i){ return joints[i];}
 
+    json dump(const std::string& tag="") const;
+
     friend ostream &operator<<( ostream &output, const Planner &p );
 
-    json dump(std::string tag="") const;
+    friend SegmentStepper;
 
 private:
 

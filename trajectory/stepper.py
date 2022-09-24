@@ -1,5 +1,4 @@
 from collections import namedtuple
-from math import sqrt
 
 StepParams = namedtuple('StepParams', 'n tn  cn ca1 xn vn dir tf x')
 
@@ -31,26 +30,24 @@ class Stepper(object):
 
     done: bool = False
 
+
     def __init__(self, period=DEFAULT_PERIOD, details=False):
         """Return segment parameters given the initial velocity, final velocity, and distance traveled. """
 
         self.period = period
         self.delay_inc = period / TIMEBASE
-        self.details = details
-        self.delay_inc = self.period / TIMEBASE
+        self.delay_counter = 0
 
         self.t = 0
-        self.t0 = self.t
         self.phase_t = 0
         self.phase = 0
-        self.phases_left = 0
         self.steps_left = 0
         self.steps_stepped = 0
-        self.nst = 0
-
+        self.calc_x = 0
+        self.details = details
+        self.v = 0
+        self.step_inc = 1
         self.done = False
-
-        self.iter = 0
 
     def load_phases(self, phases):
         """ Phases is a list of tuples, (x, vi, vf)
@@ -61,77 +58,74 @@ class Stepper(object):
         """
         self.phases = phases
         self.phase = 0
-        self.phases_left = len(phases)
         self.done = False
-
-        return self
 
     def init_next_phase(self):
 
-        self.t0 += self.phase_t
-
-        x, self.vi, self.vf = self.phases[self.phase]
+        x, vi, vf = self.phases[self.phase]
 
         self.direction = sign(x)
-        self.x = abs(x)
-        self.steps_left = int(round(self.x))
 
+        self.x = abs(x)
+        self.vi = vi
+        self.vf = vf
+        self.delay_inc = self.period / TIMEBASE
+        self.step_inc = 1
+
+        self.t_f = abs((2. * self.x) / (vi + vf)) if (vi + vf) != 0 else 0
+        self.a = (self.vf - self.vi) / self.t_f if self.t_f != 0 else 0
+
+        self.steps_left = int(round(self.x))
         self.steps_stepped = 0
         self.phase_t = 0
 
-        self.phases_left -= 1
-        self.phase += 1
+        self.calc_x = 0
+
+        # Slow start. Without this, we get a step early in the phase,
+        # which results in very high instantaneous velocity.
+
+        self.v = self.a * self.delay_inc + self.vi
+        self.delay = abs(1 / self.v) if self.v else 0
+        self.delay_counter += self.delay_inc
+
+        self.periods_left = int(round(self.t_f / self.delay_inc))
+
         self.done = False
-
-        self.nst = self.next_step_time(1) if self.steps_left > 0 else 0
-
-    def next_step_time(self, step):
-
-        # If they are the same, a==0, we get divide by zero, so
-        # make them slightly different and it works.
-        if self.vi == self.vf:
-            vi = self.vi + .1
-            vf = self.vf - .1
-        else:
-            vi = self.vi
-            vf = self.vf
-
-        t = 2 * self.x / (vi + vf)
-        a = (vf - vi) / t if t != 0 else 0
-
-        try:
-            return abs((-self.vi + sqrt(2 * a * step + self.vi ** 2)) / a)
-        except ValueError:
-            return abs( self.vi  / a)
 
     def next(self):
 
-        if self.done:
-            return 0
-
-        if self.steps_left <= 0:
-
-            if self.phases_left != 0:
-                self.init_next_phase()
-            else:
+        if self.steps_left <= 0 or self.periods_left <= 0:
+            if self.done or self.phase == 3:
                 self.done = True
                 return 0
+            else:
+                self.init_next_phase()
+                self.phase += 1
 
-        if self.phase_t >= self.nst:
-
-            self.steps_left -= 1
-            self.steps_stepped += 1
-
+        if self.delay_counter > self.delay:
+            self.delay_counter -= self.delay
+            self.steps_left -= self.step_inc
+            self.steps_stepped += self.step_inc
             r = self.direction
-
-            if self.steps_left > 0:
-                self.nst = self.next_step_time(self.steps_stepped + 1)
-
         else:
             r = 0
 
+        self.periods_left -= 1
+
+        self.v = self.vi + self.a * self.phase_t
+
+        self.delay = abs(1 / self.v) if self.v else 1
+        self.delay_counter += self.delay_inc
+
         self.t += self.delay_inc
         self.phase_t += self.delay_inc
+
+        self.calc_x = abs((self.a * self.phase_t ** 2) / 2 + self.vi * self.phase_t)
+        self.x_err = self.steps_stepped - self.calc_x
+
+        if abs(self.x_err) > .5 and self.phase == 1:
+            s = self.x_err / abs(self.x_err)
+            self.delay_counter += -s * self.delay_inc * .1
 
         return r
 
@@ -143,19 +137,19 @@ class Stepper(object):
                  sl=self.steps_left, pl=self.periods_left,
                  sg=None, ph=self.phase,
                  dl=self.delay, dc=self.delay_counter,
-                 xc=self.calc_x,
-                 # xe=self.x_err,
+                 xc=self.calc_x, xe=self.x_err,
                  # isdone=self.done
                  )
 
         return d
 
     def __iter__(self):
-        while not self.done:
-            if self.details:
-                yield self.next_details()
-            else:
-                yield self.next()
+        if self.details:
+            while not self.done:
+                if self.details:
+                    yield self.next_details()
+                else:
+                    yield self.next()
 
 
 class SegmentStepper:
@@ -208,6 +202,7 @@ class SegmentStepper:
 
             done = self.steppers[0].done and all([stp.done for stp in self.steppers])
 
+
         # When done, invalidate the segment and remove it.
         if done:
             self.sl.pop()
@@ -220,7 +215,7 @@ class SegmentStepper:
         return [stp.done for stp in self.steppers]
 
     def __next__(self):
-        s = self.step()
+        s =  self.step()
         if s is None:
             raise StopIteration
         else:
