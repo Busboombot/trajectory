@@ -139,7 +139,7 @@ class CPPPlanner:
         return inpt
 
 
-    def run_planner(self, joints, moves):
+    def _run_planner(self, joints, moves, options):
         import json
 
         inpt = self.make_input(joints, moves)
@@ -147,7 +147,7 @@ class CPPPlanner:
         with open(self.test_dir.joinpath('planner_input.txt'), 'w') as f:
             f.write(inpt)
 
-        proc = subprocess.Popen([str(self.exe_path),'-pj'], text=True, encoding='utf-8',
+        proc = subprocess.Popen([str(self.exe_path),options], text=True, encoding='utf-8',
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         try:
             outs, errs = proc.communicate(input=inpt, timeout=2)
@@ -156,13 +156,25 @@ class CPPPlanner:
             proc.kill()
             outs, errs = proc.communicate()
 
-        for line in outs.splitlines():
-            try:
+        if 'j' in options: # JSON output
+            for line in outs.splitlines():
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError as e:
+                    print("| ",line)
+        elif 's' in options: # stepper output
+            steps = []
+            for line in outs.splitlines():
+                t, *d = line.split()
+                steps.append([float(t)]+list(map(int, d)))
+            return steps
 
-                return json.loads(line)
 
-            except json.JSONDecodeError as e:
-                print("| ",line)
+    def run_planner(self, joints, moves):
+        return self._run_planner(joints, moves, '-pj')
+
+    def run_stepper(self, joints, moves):
+        return self._run_planner(joints, moves, '-s')
 
     def planner(self, joints, moves):
 

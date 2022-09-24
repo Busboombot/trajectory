@@ -72,7 +72,7 @@ void Planner::move(const MoveArray &move) {
         current->plan(NAN, 0, 0);
     }
 
-
+    queue_size = segments.size();
 }
 
 trj_float_t vLimit(int p_iter, trj_float_t v_max){

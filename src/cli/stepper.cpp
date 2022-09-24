@@ -75,6 +75,7 @@ ostream &operator<<(ostream &output, const Segments &s) {
 int main() {
 
     Segments segments;
+    double dtime = 5./1e6; // 5 us
 
     /// Load all of the lines in to vectors
 
@@ -116,7 +117,7 @@ int main() {
             int sn = 0;
             for( auto &ss: steppers){
                 doneCount += ss.isDone();
-                dist[sn++] += ss.next();
+                dist[sn++] += ss.next(dtime);
             }
             step_n += 1;
         } while(doneCount == 0);

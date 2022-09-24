@@ -52,9 +52,9 @@ void StepperState::next_phase() {
     }
 }
 
-int StepperState::next() {
+int StepperState::next(double dtime) {
 
-    if (steps_left <= 0 || periods_left <= 0) {
+    if (steps_left <= 0) { //} || periods_left <= 0) {
         if (done or phases_left == 0) {
             done = true;
             return 0;
@@ -69,7 +69,6 @@ int StepperState::next() {
         delay_counter -= delay;
         steps_left -= 1;
         steps_stepped += 1;
-        r = direction;
 
         if (stepper != nullptr) {
             stepper->writeStep();
@@ -83,14 +82,12 @@ int StepperState::next() {
     double v = phase->vi + a * phase_t;
 
     delay = v != 0 ? abs(1 / v) : 1;
-    delay_counter += delay_inc;
+    delay_counter += dtime;
 
-    t += delay_inc;
-    phase_t += delay_inc;
+    t += dtime;
+    phase_t += dtime;
 
-
-
-    return r;
+    return 1;
 }
 
 
@@ -103,8 +100,10 @@ SegmentStepper::SegmentStepper(Planner &planner) : planner(planner) {
     }
 }
 
-int SegmentStepper::next() {
+int SegmentStepper::next(double dtime) {
 
+    time += dtime;
+    totalPeriods += 1;
 
     if (activeAxes == 0 && !planner.segments.empty()) {
 
@@ -116,12 +115,10 @@ int SegmentStepper::next() {
         }
     }
 
+    activeAxes = 0;
     for (StepperState &s: stepperStates) {
-        s.next();
+        activeAxes += s.next(dtime);
     }
-
-    activeAxes = stepperStates.size();
-    for (const StepperState &s: stepperStates) activeAxes -= (int) s.isDone();
 
     if (activeAxes == 0 && !planner.segments.empty()) {
         planner.segments.pop_front();

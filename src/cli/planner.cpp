@@ -5,15 +5,20 @@
 #include <vector>
 #include <sstream>
 #include <exception>
+#include <chrono>
+#include <memory>
 
 #include <boost/program_options.hpp>
 
 #include "trj_joint.h"
 #include "trj_planner.h"
 
-#include <chrono>
+
 using namespace std;
 namespace po = boost::program_options;
+
+#define csdc(p) ( std::dynamic_pointer_cast<CoutStepper>(p))
+
 
 std::vector<int> extractIntegerWords(string str)
 {
@@ -68,6 +73,66 @@ Planner *makePlanner(vector<Joint> &joints, Moves &moves){
     return planner;
 }
 
+class ArrayStepper : public Stepper {
+
+public:
+
+    ArrayStepper(int axis, vector<int> &output) : Stepper(axis), output(output) { }
+
+    ~ArrayStepper() override {}
+
+    void writeStep() override {
+        Stepper::writeStep();
+        output[axis] = 1;
+        count += direction;
+        lastStep = 1;
+    }
+
+    void clearStep() override {
+        Stepper::clearStep();
+        output[axis] = 0;
+        lastStep = 0;
+    }
+
+    void setDirection(Direction direction_) override {
+        Stepper::setDirection(direction_);
+    }
+
+
+public:
+    vector<int> &output;
+    int lastStep = 0;
+    int count = 0;
+};
+
+
+void runSteppers(Planner &p, ostream &os){
+
+    double dtime = 5./1e6; // 5 us
+
+    SegmentStepper ss(p);
+
+    auto steps = vector<int>(p.getJoints().size());
+
+    vector<StepperPtr> steppers;
+    steppers.push_back(std::make_shared<ArrayStepper>(0, steps));
+    steppers.push_back(std::make_shared<ArrayStepper>(1, steps));
+    steppers.push_back(std::make_shared<ArrayStepper>(2, steps));
+
+    ss.setSteppers(steppers);
+
+    auto start = chrono::steady_clock::now();
+
+    int n_iter = 0;
+    double time = 0;
+    do {
+        ss.next(dtime);
+        cout << time << " "; for(int &i : steps) cout << i << " "; cout << endl;
+        time += dtime;
+    } while (!p.empty());
+
+}
+
 int main(int ac, char **av) {
 
     vector<Joint> joints;
@@ -97,7 +162,7 @@ int main(int ac, char **av) {
     auto end = chrono::steady_clock::now();
     auto diff = chrono::duration_cast<chrono::microseconds>(end - start);
 
-    if (!vm.count("json")){
+    if (!vm.count("json") and !vm.count("stepper")){
         cout << "Processed moves in " << diff.count() << "μs" << endl;
     }
 
@@ -113,7 +178,7 @@ int main(int ac, char **av) {
         if (vm.count("json")){
 
         } else {
-            cout << *planner << endl;
+            runSteppers(*planner, cout);
         }
     }
 

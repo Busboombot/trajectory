@@ -86,7 +86,8 @@ public:
 
     }
     void next_phase();
-    int next();
+
+    int next(double dtime);
 
     inline int isDone() const { return done ? 1 : 0; };
 
@@ -98,9 +99,15 @@ class SegmentStepper {
 public:
 
     explicit SegmentStepper(Planner &planner);
-    int next();
+    int next(double dtime);
 
     void setSteppers( vector<StepperPtr> steppers);
+
+    unsigned long getTotalPeriods() const { return totalPeriods; }
+
+    unsigned long getActiveAxes() const { return activeAxes;}
+
+    double getTime() const { return time; }
 
 private:
 
@@ -108,9 +115,10 @@ private:
     vector<StepperState> stepperStates;
     vector<StepperPtr> steppers;
 
-private:
+    unsigned long totalPeriods = 0;
 
     unsigned long activeAxes = 0;
+    double time;
 
 };
 

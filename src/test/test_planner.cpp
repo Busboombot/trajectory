@@ -23,6 +23,15 @@ vector<Joint> get2Joints(){
     };
 }
 
+vector<Joint> get4Joints(){
+    return std::vector<Joint>{
+            Joint(0, 5e3, 50e3),
+            Joint(1, 5e3, 50e3),
+            Joint(2, 5e3, 50e3),
+            Joint(3, 5e3, 50e3)
+    };
+}
+
 
 TEST_CASE("Basic Planner Test", "[planner]"){
 
