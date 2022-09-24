@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <vector>
 #include <numeric>
 
@@ -12,28 +13,33 @@ extern vector<Move> get2Moves();
 
 extern vector<Joint> get2Joints();
 
-class CoutStepper : public StepInterface {
+class CoutStepper : public Stepper {
 
 public:
 
-    CoutStepper(int axis, vector<int> &acc, double &time) : axis(axis), acc(acc), last_time(time) {}
+    CoutStepper(int axis) : Stepper(axis) { }
 
-    int step(double time, int step) override {
-        last_time = time;
-        acc[axis] = step;
-        return step;
+    ~CoutStepper() override {}
+
+    void writeStep() override {
+        Stepper::writeStep();
+        count += direction;
+        lastStep = 1;
     }
 
-    void setDirection(int direction_) override {
-        direction = direction_;
+    void clearStep() override {
+        Stepper::clearStep();
+        lastStep = 0;
     }
+
+    void setDirection(Direction direction_) override {
+        Stepper::setDirection(direction_);
+    }
+
 
 public:
-    int direction;
-    vector<int> &acc;
-    int axis;
-    double &last_time;
-
+    int lastStep = 0;
+    int count = 0;
 };
 
 TEST_CASE("Basic Stepper Test", "[stepper]") {
@@ -49,53 +55,30 @@ TEST_CASE("Basic Stepper Test", "[stepper]") {
     cout << " ============ " << endl;
     cout << p << endl;
 
-    vector<int> acc(joints.size());
-    vector<int> counts(joints.size());
 
-
-    double last_time;
-    int stepSum;
     SegmentStepper ss(p);
 
-    vector<StepInterface *> steppers{
-            new CoutStepper(0, acc, last_time),
-            new CoutStepper(1, acc, last_time)
-    };
+    vector<StepperPtr> steppers;
+    steppers.push_back(std::make_shared<CoutStepper>(0 ));
+    steppers.push_back(std::make_shared<CoutStepper>(1));
+
     ss.setSteppers(steppers);
 
-    //for(int i =0 ;i < 100'000; i++)
     do {
-
         ss.next();
+    } while (!p.empty());
 
-        stepSum = accumulate(acc.begin(), acc.end(), 0);
-
-        auto ai = acc.begin();
-        for (int &c: counts) {
-            c += *ai++;
-        }
-
-        if (stepSum > 0) {
-            // cout << last_time << " ";
-            for (auto s: acc) {
-                //cout << s << " ";
-            }
-            //cout << endl;
-        }
-    } while (p.getNSegments() > 0);
 
     // Check that it doesn't crash after segments are exhausted.
     ss.next();
     ss.next();
     ss.next();
 
-    REQUIRE(counts[0] == -500);
-    REQUIRE(counts[1] == 0);
-    REQUIRE( round(last_time*10)/10 == 6.2 );
+    auto stp = std::dynamic_pointer_cast<CoutStepper>(steppers[0]);
+    REQUIRE(stp->count == -500);
+    stp = std::dynamic_pointer_cast<CoutStepper>(steppers[1]);
+    REQUIRE(stp->count == 0);
 
-    cout << last_time << " ";
-    for (int &c: counts) cout << c << " ";
     cout << endl;
-
 
 }

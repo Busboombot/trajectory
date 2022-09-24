@@ -7,12 +7,37 @@
 
 using namespace std;
 
-class StepInterface {
+
+class Stepper {
+
+protected:
+
+    int8_t axis;
+    bool enabled = false;
+    Direction direction;
+    int stepState = 0;
+
 public:
-    StepInterface()= default;
-    virtual int step(double t, int step) = 0;
-    virtual void setDirection(int direction) = 0;
+
+    Stepper() : axis(0), enabled(false){};
+    Stepper(int8_t axis) : axis(axis), enabled(false){ };
+    virtual ~Stepper(){}
+
+    virtual void writeStep(){ stepState = 1; }
+    virtual void clearStep(){ stepState = 0; };
+    virtual void enable(){enabled = true;};
+    virtual void enable(Direction dir){ setDirection(dir);enable();}
+    virtual void disable() { setDirection(STOP); enabled = false;}
+    virtual void setDirection(Direction dir){  direction = dir; }
+    virtual void setDirection(int dir){  this->setDirection(static_cast<Direction>(dir)); };
+
+private:
+    friend ostream &operator<<( ostream &output, const Stepper &s );
+
 };
+
+using StepperPtr = shared_ptr<Stepper>;
+
 
 struct StepperPhase{
     int x;
@@ -46,9 +71,9 @@ private:
     int phase_n;
     int phases_left = 0;
     vector<StepperPhase> phases;
-    const StepperPhase *phase; // Current pahse.
+    const StepperPhase *phase; // Current phase.
 
-    StepInterface *stepper=nullptr;
+    StepperPtr stepper;
 
 public:
     StepperState(int period, int timebase);
@@ -56,7 +81,10 @@ public:
 
     void loadPhases(vector<StepperPhase> phases);
     void loadPhases(array<StepperPhase,3> phases);
-    void setStepper(StepInterface* stepper_){ stepper = stepper_;}
+    void setStepper(StepperPtr stepper_){
+        stepper = stepper_;
+
+    }
     void next_phase();
     int next();
 
@@ -72,14 +100,13 @@ public:
     explicit SegmentStepper(Planner &planner);
     int next();
 
+    void setSteppers( vector<StepperPtr> steppers);
 
 private:
 
     Planner & planner;
     vector<StepperState> stepperStates;
-    vector<StepInterface*> steppers;
-public:
-    void setSteppers(const vector<StepInterface *> &steppers);
+    vector<StepperPtr> steppers;
 
 private:
 

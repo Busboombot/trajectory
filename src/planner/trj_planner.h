@@ -74,6 +74,7 @@ public:
     VelocityVector V_NAN = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN};
 
     unsigned long getNSegments(){  return segments.size();}
+    bool empty(){  return segments.empty();}
 
     uint32_t getQueueTime() const{ return queue_time;  }
 

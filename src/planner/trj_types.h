@@ -22,6 +22,14 @@ enum class MoveType {
     home
 };
 
+typedef enum
+{
+    CCW = -1,  ///< Clockwise
+    STOP = 0,  ///< Clockwise
+    CW  = 1   ///< Counter-Clockwise
+
+} Direction;
+
 constexpr int BV_PRIOR = -1;
 constexpr int BV_NEXT = -2;
 constexpr int BV_V_MAX = -3;
