@@ -26,7 +26,6 @@ if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 endif ()
 
 add_subdirectory(planner)
-add_subdirectory(python)
 add_subdirectory(cli)
 
 enable_testing()

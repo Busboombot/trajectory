@@ -56,7 +56,7 @@ class TestPlanner:
     """Run the unit test program, looking for tests that output JSON"""
     def __init__(self, test_dir):
         from pathlib import Path
-        self.test_dir = Path(test_dir) / 'test'
+        self.test_dir = Path(test_dir)
         self.exe_path = self.test_dir.joinpath('test_planner')
 
     def make(self):
@@ -75,7 +75,7 @@ class TestPlanner:
         import json
         o = {}
 
-        r = subprocess.check_output([self.exe_path], timeout=1)
+        r = subprocess.check_output([self.exe_path, r'[json]'], timeout=1)
         r = r.decode('utf8')
 
         for l in r.splitlines():
