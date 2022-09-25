@@ -17,6 +17,7 @@
 #include "trj_joint.h"
 #include "trj_types.h"
 #include "trj_stepper.h"
+#include "trj_segstepper.h"
 #include "json.hpp"
 
 
@@ -31,9 +32,7 @@ using json = nlohmann::json;
 
 class Segment;
 class Joint;
-
-// Trajectory Planner. Turns a sequence of moves into moves plus velocities
-
+class SegmentStepper;
 
 class Planner {
 
@@ -65,8 +64,7 @@ public:
 
     bool isEmpty();
 
-
-
+    //SegmentStepper& getSegmentStepper();
 
 public:
 
@@ -99,6 +97,9 @@ public:
     friend ostream &operator<<( ostream &output, const Planner &p );
 
     friend SegmentStepper;
+
+private:
+
 
 private:
 

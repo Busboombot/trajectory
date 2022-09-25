@@ -17,8 +17,6 @@
 
 using namespace boost::filesystem;
 
-
-
 extern vector<Move> get2Moves();
 extern vector<Joint> get2Joints();
 extern vector<Joint> get4Joints();

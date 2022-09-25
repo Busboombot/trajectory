@@ -11,7 +11,7 @@ add_library( ${PROJECT_NAME}
         trj_block.cpp
         trj_joint.cpp
         trj_planner.cpp
-        trj_stepper.cpp trj_stepper.h)
+        trj_stepper.cpp trj_stepper.h trj_segstepper.cpp)
 
 configure_file(version.h.in version.h)
 target_compile_definitions(${PROJECT_NAME} PUBLIC "TRJ_ENV_HOST")

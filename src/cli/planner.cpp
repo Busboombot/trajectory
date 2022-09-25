@@ -1,4 +1,7 @@
-
+/*
+ * Read an input file that describe joints and moves, then print out the planned
+ * moves, or the steps for those moves.
+ */
 
 #include <string>
 #include <iostream>

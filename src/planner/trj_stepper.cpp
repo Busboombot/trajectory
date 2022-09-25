@@ -1,7 +1,6 @@
 #include <tuple>
 #include <utility>
 #include "trj_stepper.h"
-#include "trj_planner.h"
 
 StepperState::StepperState(int period, int timebase) : period(period), timebase(timebase) {
 
@@ -90,55 +89,6 @@ int StepperState::next(double dtime) {
     return 1;
 }
 
-
-SegmentStepper::SegmentStepper(Planner &planner) : planner(planner) {
-
-    stepperStates.erase(stepperStates.begin(), stepperStates.end());
-
-    for (const Joint &j: planner.getJoints()) {
-        stepperStates.emplace_back();
-    }
-}
-
-int SegmentStepper::next(double dtime) {
-
-    time += dtime;
-    totalPeriods += 1;
-
-    if (activeAxes == 0 && !planner.segments.empty()) {
-
-        Segment &seg = planner.segments.front();
-
-        auto ssi = stepperStates.begin();
-        for (const Block &b: seg.blocks) {
-            (*ssi++).loadPhases(b.getStepperPhases());
-        }
-    }
-
-    activeAxes = 0;
-    for (StepperState &s: stepperStates) {
-        activeAxes += s.next(dtime);
-    }
-
-    if (activeAxes == 0 && !planner.segments.empty()) {
-        planner.segments.pop_front();
-    }
-
-    return (int) activeAxes;
-
-}
-
-void SegmentStepper::setSteppers(vector<StepperPtr> steppers_ ){
-
-    this->steppers = steppers_;
-
-    auto ssi = stepperStates.begin();
-
-    for (StepperPtr &si: steppers) {
-        si->setDirection(0);
-        (*ssi++).setStepper(si);
-    }
-}
 
 ostream &operator<<(ostream &output, const Stepper &s) {
     output << "[Stp " << (int) s.axis << " ]";

@@ -34,3 +34,7 @@ constexpr int BV_PRIOR = -1;
 constexpr int BV_NEXT = -2;
 constexpr int BV_V_MAX = -3;
 constexpr int BV_NAN = -4;
+
+
+
+

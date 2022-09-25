@@ -14,17 +14,15 @@ using namespace std;
 
 int here_count = 0; // for the HERE macro, in trj_util
 
-Planner::Planner() {
+Planner::Planner()  {
 
 }
 Planner::Planner(std::vector<Joint> joints_) {
 
     setJoints(joints_);
-
 }
 
 void Planner::setJoints(std::vector<Joint> joints_){
-
 
     joints.erase (joints.begin(),joints.end());
 
@@ -36,6 +34,8 @@ void Planner::setJoints(std::vector<Joint> joints_){
         j.n = i++;
         joints.push_back(j);
     }
+
+
 }
 
 void Planner::move(const Move &move) {
@@ -201,7 +201,5 @@ json Planner::dump(const std::string& tag) const{
 
     return j;
 }
-
-
 
 

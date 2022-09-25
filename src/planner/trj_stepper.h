@@ -3,7 +3,6 @@
 #include <vector>
 #include <array>
 #include "trj_util.h"
-#include "trj_planner.h"
 
 using namespace std;
 
@@ -82,7 +81,7 @@ public:
     void loadPhases(vector<StepperPhase> phases);
     void loadPhases(array<StepperPhase,3> phases);
     void setStepper(StepperPtr stepper_){
-        stepper = stepper_;
+        stepper = std::move(stepper_);
 
     }
     void next_phase();
@@ -90,35 +89,6 @@ public:
     int next(double dtime);
 
     inline int isDone() const { return done ? 1 : 0; };
-
-};
-
-
-class SegmentStepper {
-
-public:
-
-    explicit SegmentStepper(Planner &planner);
-    int next(double dtime);
-
-    void setSteppers( vector<StepperPtr> steppers);
-
-    unsigned long getTotalPeriods() const { return totalPeriods; }
-
-    unsigned long getActiveAxes() const { return activeAxes;}
-
-    double getTime() const { return time; }
-
-private:
-
-    Planner & planner;
-    vector<StepperState> stepperStates;
-    vector<StepperPtr> steppers;
-
-    unsigned long totalPeriods = 0;
-
-    unsigned long activeAxes = 0;
-    double time;
 
 };
 
